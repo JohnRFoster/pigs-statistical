@@ -7,12 +7,22 @@ library(assertthat)
 drive_auth(use_oob = TRUE)
 
 #* need to set directory to repro location
-setwd("~/Desktop/APHIS/abundanceModeling/wild-pigs")
+# setwd("~/Desktop/APHIS/abundanceModeling/wild-pigs")
+
+#### let's try the workflow without manually setting the wd
+
 
 # Get county-level shapefile for USA --------------------------------------
 
+# set path to where shapefiles are stored
 shp_path <- file.path('data', 'counties', 'dtl.cnty.lower48.meters.shp')
+
+
+
+# check if we have data
 shp_missing <- !file.exists(shp_path)
+
+
 if (shp_missing) {
   zip_loc_on_gdrive <- drive_find(pattern = 'Detailed.U.S.Counties')
   assert_that(nrow(zip_loc_on_gdrive) == 1)
@@ -50,6 +60,8 @@ most_recent_insitu <- c(
 
 
 insitu_prefix <- file.path('data', 'insitu')
+
+
 maybe_get_csv <- function(filename, prefix) {
   insitu_path <- file.path(prefix, filename)
   if (!file.exists(insitu_path)) {

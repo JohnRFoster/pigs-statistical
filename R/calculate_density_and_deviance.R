@@ -10,11 +10,11 @@ libs <- c("rgdal", "maptools", "gridExtra","classInt","Rcpp","raster","maps","ma
 lapply(libs, require, character.only = TRUE)
 
 
-setwd("/project/iwctml/mtabak/APHIS/abundance/wild-pigs")
-setwd("~/Desktop/APHIS/abundanceModeling/wild-pigs")
+# setwd("/project/iwctml/mtabak/APHIS/abundance/wild-pigs")
+# setwd("~/Desktop/APHIS/abundanceModeling/wild-pigs")
 
 # read in data
-st_d <- read_rds('st_d.rds')
+st_d <- read_rds('st_d.rds') # model inputs
 m_fit <- read_rds("./fitted_mods/saturating_fit_20190416.rds")
 fit <- "fit20190416" # this is the location name in ./fitted_mods/
 stan_d <- read_rds("stan_d.rds")
@@ -23,7 +23,7 @@ cnty_dens_meth <- "weighted"
 
 # extract abunaces
 log_lambda <- data.frame(rstan::extract(m_fit, "log_lambda"))
-# for every row in st_d, there is a column in log_lambda that represents the 
+# for every row in st_d, there is a column in log_lambda that represents the
 # posterior distribution of the abundance for that spatio temporal unit
 
 # convert to densities for these
@@ -57,7 +57,7 @@ if(cnty_dens_meth=="weighted"){
       for(j in 1:length(weights)){
         tmpMeans[, j] <- density_cols[,j] * weights[j]
       }
-      st_means[,i] <- rowMeans(tmpMeans) 
+      st_means[,i] <- rowMeans(tmpMeans)
     } else {
       st_means[,i] <- dens[, st_index[[i]][1]]
     }
@@ -66,7 +66,7 @@ if(cnty_dens_meth=="weighted"){
   # using just the mean
   for(i in 1:n_st){
     if(length(st_index[[i]]) > 1){
-      st_means[,i] <- rowMeans(dens[,st_index[[i]][1:length(st_index[[i]])]]) #apply(dens, 2, function(x){rowMeans(x[st_index[[i]][1:length(st_index[[i]])]])}) 
+      st_means[,i] <- rowMeans(dens[,st_index[[i]][1:length(st_index[[i]])]]) #apply(dens, 2, function(x){rowMeans(x[st_index[[i]][1:length(st_index[[i]])]])})
     } else {
       st_means[,i] <- dens[, st_index[[i]][1]]
     }
@@ -83,7 +83,7 @@ cnty_dens <- t(st_means) # here st units are rows and columns are MCMC iteration
 # (removing duplicate rows for mulitple surveys because these are now accounted for in st_means)
 cnty_d <- st_d[!duplicated(st_d$FIPS_timestep), ]
 # mean and median posterior density for each st unit
-cnty_d$meanDens <- apply(cnty_dens, 1, mean) 
+cnty_d$meanDens <- apply(cnty_dens, 1, mean)
 cnty_d$medDens <- apply(cnty_dens, 1, function(x) quantile(x, 0.5))
 cnty_d$loDens <- apply(cnty_dens, 1, function(x) quantile(x, 0.025))
 cnty_d$hiDens <- apply(cnty_dens, 1, function(x) quantile(x, 0.975))
@@ -201,7 +201,7 @@ for(i in dev_cty){
 }
 # now try breaking this out by n_samp_cty
 cty_devs[,7] <- n_samp_cty_dev <- n_samp_cty[match(dev_cty, n_samp_cnty[,1])] # number of samples per county for county in the deviance dataset
-devs_bySamp <- matrix(NA, nrow=length(unique(n_samp_cty_dev)), ncol=7) 
+devs_bySamp <- matrix(NA, nrow=length(unique(n_samp_cty_dev)), ncol=7)
 devs_bySamp.025 <- aggregate(as.numeric(cty_devs[,2]) ~ as.numeric(cty_devs[,7]), FUN=mean)
 devs_bySamp.25 <- aggregate(as.numeric(cty_devs[,3]) ~ as.numeric(cty_devs[,7]), FUN=mean)
 devs_bySamp.5 <- aggregate(as.numeric(cty_devs[,4]) ~ as.numeric(cty_devs[,7]), FUN=mean)
@@ -209,7 +209,7 @@ devs_bySamp.75 <- aggregate(as.numeric(cty_devs[,5]) ~ as.numeric(cty_devs[,7]),
 devs_bySamp.975 <- aggregate(as.numeric(cty_devs[,6]) ~ as.numeric(cty_devs[,7]), FUN=mean)
 devs_bySamp <- data.frame(devs_bySamp.025, devs_bySamp.25[,2], devs_bySamp.5[,2],
                           devs_bySamp.75[,2], devs_bySamp.975[,2])
-colnames(devs_bySamp) <- c("n_surveys", "deviance.025", "deviance.25", "deviance.5", 
+colnames(devs_bySamp) <- c("n_surveys", "deviance.025", "deviance.25", "deviance.5",
                            "deviance.75", "deviance.975")
 # make plot
 thick95 <- 1
@@ -239,7 +239,7 @@ for(i in dev_prp){
 }
 # break out by property
 prp_devs[,7] <- n_samp_prp_dev <- n_samp_prp[match(dev_prp, n_samp_prop[,1])] # number of samples per county for county in the deviance dataset
-devs_bySamp <- matrix(NA, nrow=length(unique(n_samp_prp_dev)), ncol=7) 
+devs_bySamp <- matrix(NA, nrow=length(unique(n_samp_prp_dev)), ncol=7)
 devs_bySamp.025 <- aggregate(as.numeric(prp_devs[,2]) ~ as.numeric(prp_devs[,7]), FUN=mean)
 devs_bySamp.25 <- aggregate(as.numeric(prp_devs[,3]) ~ as.numeric(prp_devs[,7]), FUN=mean)
 devs_bySamp.5 <- aggregate(as.numeric(prp_devs[,4]) ~ as.numeric(prp_devs[,7]), FUN=mean)
@@ -247,7 +247,7 @@ devs_bySamp.75 <- aggregate(as.numeric(prp_devs[,5]) ~ as.numeric(prp_devs[,7]),
 devs_bySamp.975 <- aggregate(as.numeric(prp_devs[,6]) ~ as.numeric(prp_devs[,7]), FUN=mean)
 devs_bySamp <- data.frame(devs_bySamp.025, devs_bySamp.25[,2], devs_bySamp.5[,2],
                           devs_bySamp.75[,2], devs_bySamp.975[,2])
-colnames(devs_bySamp) <- c("n_surveys", "deviance.025", "deviance.25", "deviance.5", 
+colnames(devs_bySamp) <- c("n_surveys", "deviance.025", "deviance.25", "deviance.5",
                            "deviance.75", "deviance.975")
 # make plot
 thick95 <- 1
@@ -322,7 +322,7 @@ bad_fits <- dev_d[abs(dev_d$dev2) > 20, ]
 cbind(bad_fits$y, bad_fits$y_hat)
 
 #---------------------------------------------------------------
-# compare posterior predicted harvest with 
+# compare posterior predicted harvest with
 # observed harvest
 #---------------------------------------------------------------
 # extract some data
@@ -357,7 +357,7 @@ survey_idx <- stan_d$survey_idx
 n <- length(survey_idx)
 n_surv <- table(survey_idx)
 survey_num <- 1:max(survey_idx)
-surv_list <- list() # for every survey conducted, these are the indices in y, y_rep, log_p, that correspond 
+surv_list <- list() # for every survey conducted, these are the indices in y, y_rep, log_p, that correspond
 for(i in 1:length(survey_num)){
   surv_list[[i]] <- which(survey_idx %in% survey_num[i])
 }
@@ -368,7 +368,7 @@ pred_abun <- rep(NA, length(survey_num)) # an abundance for every unique survey
 for(i in survey_idx){
   pred_abun[i] <-  exp(lam_sum[i] + median(p_sum[surv_list[[i]]]))
 }
-pred_abun2 <- pred_abun[!is.na(pred_abun)] 
+pred_abun2 <- pred_abun[!is.na(pred_abun)]
 
 # calculate median predicted harvest
 num_survs <- lapply(surv_list, length)
@@ -376,18 +376,18 @@ max(unlist(num_survs))
 pred_harv <- matrix(NA, nrow=length(survey_num), ncol=172)
 for(i in survey_idx){
   pred_harv[i,1:length(surv_list[[i]])] <- y_rep_sum2$med[surv_list[[i]]]
-} 
+}
 
 # get effort for each of these
 scaled_effort <- effort <- matrix(NA, nrow=length(survey_num), ncol=172)
 for(i in survey_idx){
   scaled_effort[i,1:length(surv_list[[i]])] <- y_rep_sum2$scaled_effort[surv_list[[i]]]
   effort[i,1:length(surv_list[[i]])] <- y_rep_sum2$effort[surv_list[[i]]]
-} 
+}
 
 # export
 out <- data.frame(pred_abun=pred_abun,
-                  pred_harv=pred_harv, 
+                  pred_harv=pred_harv,
                   scaled_effort=scaled_effort,
                   effort=effort
 )
@@ -402,7 +402,7 @@ method <- stan_d$method
 method_mat <- matrix(NA, nrow=length(survey_num), ncol=172)
 for(i in survey_idx){
   method_mat[i,1:length(surv_list[[i]])] <- method[surv_list[[i]]]
-} 
+}
 write_csv(as.data.frame(method_mat), "./fitted_mods/fit20190416/method_matrix.csv")
 
 #*** loading this on local machine
@@ -439,7 +439,7 @@ pred_harv <- harv[, grep("pred_harv", colnames(harv))]
 #matplot(harv$pred_abun, pred_harv)
 
 # make plot
-plot(harv$pred_abun, pred_harv[,1], xlab="posterior predicted abundance", 
+plot(harv$pred_abun, pred_harv[,1], xlab="posterior predicted abundance",
      ylab="posterior predicted harvest", axes=FALSE, cex=.4)
 axis(1)
 axis(2, las=2)
@@ -454,7 +454,7 @@ well <- harv[harv$scaled_effort.1 > 0, ]
 
 # make plot - well sampled
 pred_harv <- well[, grep("pred_harv", colnames(well))]
-plot(well$pred_abun, pred_harv[,1], xlab="posterior predicted abundance", 
+plot(well$pred_abun, pred_harv[,1], xlab="posterior predicted abundance",
      ylab="posterior predicted harvest", axes=FALSE, cex=.4, col="dark orange")
 axis(1)
 axis(2, las=2)
@@ -480,13 +480,13 @@ ones1 <- ifelse(methods==1, 1, NA)
 sum(ones1, na.rm=TRUE)
 ones <- matrix(NA, nrow=length(survey_idx), ncol=172) # these are the indices where methods ==1
 twos1 <- ifelse(methods==2, 2, NA)
-twos <- matrix(NA, nrow=length(survey_idx), ncol=172) 
+twos <- matrix(NA, nrow=length(survey_idx), ncol=172)
 threes1 <- ifelse(methods==3, 3, NA)
-threes <- matrix(NA, nrow=length(survey_idx), ncol=172) 
+threes <- matrix(NA, nrow=length(survey_idx), ncol=172)
 fours1 <- ifelse(methods==4, 4, NA)
-fours <- matrix(NA, nrow=length(survey_idx), ncol=172) 
+fours <- matrix(NA, nrow=length(survey_idx), ncol=172)
 fives1 <- ifelse(methods==5, 5, NA)
-fives <- matrix(NA, nrow=length(survey_idx), ncol=172) 
+fives <- matrix(NA, nrow=length(survey_idx), ncol=172)
 for(i in survey_idx){
   # ones
   ones2 <- which(ones1[i,] == 1)
@@ -523,7 +523,7 @@ for(i in survey_idx){
 # compare deviance across methods
 pdf("./fitted_mods/fit20190416/absVal_deviance_byMethod_20190906.pdf")
 par(mar=c(5,8,4,3))
-boxplot(log(y_sum$dev + 1) ~ stan_d$method, axes=FALSE, 
+boxplot(log(y_sum$dev + 1) ~ stan_d$method, axes=FALSE,
         xlab="Method of capture",
         ylab="Absolute value of deviance of \nabundance prediction from observed")
 axis(1, at=1:5, labels=c("firearms", "fixed wing", "helicopter", "snare", "trap"))
@@ -537,8 +537,8 @@ y_sum2 <- y_sum[y_sum$devVal > -280,]
 which(y_sum)
 #pdf("./fitted_mods/fit20190416/val_deviance_byMethod_20190906.pdf")
 par(mar=c(5,8,4,3))
-bp <- boxplot(y_sum$devVal ~ stan_d$method, axes=FALSE, 
-              #bp <- boxplot(log(y_sum$devVal[-which.min(y_sum$devVal)]+185) ~ stan_d$method[-which.min(y_sum$devVal)], axes=FALSE, 
+bp <- boxplot(y_sum$devVal ~ stan_d$method, axes=FALSE,
+              #bp <- boxplot(log(y_sum$devVal[-which.min(y_sum$devVal)]+185) ~ stan_d$method[-which.min(y_sum$devVal)], axes=FALSE,
               xlab="Method of capture",
               ylab="deviance", range=1000)
 axis(1, at=1:5, labels=c("firearms", "fixed wing", "helicopter", "snare", "trap"))
@@ -610,72 +610,72 @@ dens3 <- merge(dens2, prp_cnty)
 dens3$med_dens <- dens3$med.x * dens3$prp_cnty_occupied
 #write.csv(prp_cnty, "proporition_county_occupied.csv")
 # make a function that does this
-calc_slopes <- function(max_months, 
-                        min_months=1, 
+calc_slopes <- function(max_months,
+                        min_months=1,
                         trueAbun=TRUE, # using true predicted abundance instead of y_sum
-                        compare_meth="slope", 
+                        compare_meth="slope",
                         sp_unit = "property",
-                        slope_calc="effort", 
+                        slope_calc="effort",
                         remove_zeros = FALSE
 ){
-  
+
   cap_methods <- c("firearms", "fixed wing", "helicopter", "snare", "trap")
-  
-  
+
+
   if(remove_zeros){
     y_sum <- y_sum[y_sum$med_dens != 0, ]
   }
-  
+
   # set up for using different spatial units
   if(sp_unit=="property"){
     props <- unique(y_sum$agrp_prp_id)
     seqer <- seq_along(props)
     reduce_df <- matrix(NA, nrow=length(props), ncol=6)
-  } 
+  }
   if(sp_unit=="county"){
     cntys <- unique(y_sum$FIPS)
     seqer <- seq_along(cntys)
     reduce_df <- matrix(NA, nrow=length(cntys), ncol=6)
-  } 
+  }
   if(sp_unit=="state"){
     states <- unique(y_sum$state)
     seqer <- seq_along(states)
     reduce_df <- matrix(NA, nrow=length(states), ncol=6)
   }
-  
+
   for(i in seqer){
     # subset data based on spatial unit.
     # I'm calling them all prop1, regardless of the spatial unit for simplicity below
     if(sp_unit=="property"){
       prop1 <- y_sum[y_sum$agrp_prp_id == props[i],]
-    } 
+    }
     if(sp_unit=="county"){
       prop1 <- y_sum[y_sum$FIPS == cntys[i],]
-    } 
+    }
     if(sp_unit=="state"){
       prop1 <- y_sum[y_sum$state== states[i],]
     }
-    
-    
+
+
     # if work was only conducted at one timestep, ignore this property
-    if(length(unique(prop1$timestep)) < 2){ 
+    if(length(unique(prop1$timestep)) < 2){
       reduce_df[i, ] <- rep(NA, ncol(reduce_df))
     } else{
       # calculate the time differences from one timestep to the next
       diffs <- ave(prop1$timestep, FUN=function(x) c(NA,diff(x)))
       # get the indeces for time differences that are of interest
       short_idxs <- which(diffs <= max_months & diffs >= min_months)
-      
+
       # if there are not 2 instances where the time difference between removal is approporiate, ignore this st unit
-      if(length(short_idxs) < 2 ){ 
+      if(length(short_idxs) < 2 ){
         reduce_df[i, ] <- rep(NA, ncol(reduce_df))
       } else{
         # I cannot calculate the difference if it is the last year of work being done at the st unit
-        if(max(short_idxs) == nrow(prop1)){ 
+        if(max(short_idxs) == nrow(prop1)){
           short_idxs <- short_idxs[-(max(short_idxs))]
         } else{
           # if there are not 2 instances where the time difference between removal is approporiate, ignore this st unit
-          if(length(short_idxs) < 2) { 
+          if(length(short_idxs) < 2) {
             reduce_df[i, ] <- rep(NA, ncol(reduce_df))
           } else{
             prop1$diff <- rep(NA, nrow(prop1))
@@ -684,7 +684,7 @@ calc_slopes <- function(max_months,
             #difference <- (prop1$med_dens[short_idxs]-prop1$med_dens[short_idxs+1]) #absolute difference
             #difference <- (prop1$hi_dens[short_idxs]-prop1$hi_dens[short_idxs+1])
             prop1$diff[short_idxs] <- difference
-            
+
             # compare difference to effort by slope or correlation
             if(compare_meth == "slope"){
               if(slope_calc == "effort"){
@@ -701,14 +701,14 @@ calc_slopes <- function(max_months,
                 #ag2 <- aggregate(prop2$med ~ prop2$ym, FUN=median)
                 lm1 <- lm(ag2[,2] ~ ag1[,2])
               }
-              
+
               reduce_df[i,1] <- lm1$coefficients[2]
             }
             if(compare_meth == "cor"){
               reduce_df[i,1] <- cor(prop1$scaled_effort, prop1$diff, use="complete.obs",
                                     method="spearman")
             }
-            
+
             # now look at the slope for each method
             for(j in seq_along(cap_methods)){
               prop1_meth <- prop1[prop1$method==j, ]
@@ -728,12 +728,12 @@ calc_slopes <- function(max_months,
                                             method="spearman")
                 }
               }
-            } 
+            }
           }
         }
-        
+
       }
-      
+
     }
   }
   colnames(reduce_df) <- c("all_methods", "firearms", "fixed_wing", "helicopter", "snare", "trap")
@@ -794,13 +794,13 @@ plot(0, 0,
      xlim=c(-3,2.5),
      #ylim=c(1, 7), #xlim=c(-2,1),
      ylim=c(1, 2),
-     axes=FALSE, 
-     xlab="", 
+     axes=FALSE,
+     xlab="",
      ylab="", cex=cex.pch, pch=16)
 abline(v=0, lty=2, col="grey", lwd=1.5)
 for(j in seq_along(months_used)){
   # points(eval(parse(text=paste0("quant_1_", months_used[j], "[3,", j, "]"))), j, cex=cex.pch, pch=16)
-  
+
   for(i in 1:6){
     segments(x0=eval(parse(text=paste0("quant_1_", months_used[j], "[2,", i, "]"))),
              x1=eval(parse(text=paste0("quant_1_", months_used[j], "[4,", i, "]"))),
@@ -808,9 +808,9 @@ for(j in seq_along(months_used)){
     segments(x0=eval(parse(text=paste0("quant_1_", months_used[j], "[1,", i, "]"))),
              x1=eval(parse(text=paste0("quant_1_", months_used[j], "[5,", i, "]"))),
              y0=(i + (j)*var), lwd=lwd95, pch=j, col=j)
-    points(eval(parse(text=paste0("quant_1_", months_used[j], "[3,", i, "]"))), 
+    points(eval(parse(text=paste0("quant_1_", months_used[j], "[3,", i, "]"))),
            (i + (j)*var), cex=cex.pch, pch=j, col=j)
-    
+
   }
 }
 axis(1)
@@ -824,7 +824,7 @@ legend("topleft", pch=rev(1:length(months_used)), col=rev(1:length(months_used))
 dev.off()
 
 #---------------------------------------------------------------
-# evaluate the effect of effort on abundance by 
+# evaluate the effect of effort on abundance by
 # looking at residuals from slope of a moving window
 #---------------------------------------------------------------
 # read in density and abundance data
@@ -882,12 +882,12 @@ all_state <- dens3[!duplicated(dens3$FIPS.x),c(3,9)]
 
 
 # get the slope of each county in a five year window
-# then calculate the residuals for each data point where there 
+# then calculate the residuals for each data point where there
 # is a method (these are the times when culling happened)
 #u_fips <- unique(y_sum$FIPS)
 t_year <- 2 # = number of timesteps: 66 in 5 years. I might want to make this shorter
 timesteps <- 1:174
-n_windows <- length(timesteps)-t_year # number of moving windows 
+n_windows <- length(timesteps)-t_year # number of moving windows
 out <- out1 <- out2 <- out3 <- out4 <- out5 <- matrix(NA, nrow=length(u_fips), ncol=n_windows)
 #out <- array(NA, dim=c(length(u_fips), (n_windows+1),5))
 
@@ -914,17 +914,17 @@ for(i in seq_along(u_fips)){
   for(j in 1:n_windows){
     t_use <- timesteps[j:(j+t_year)]
     cntyDT2 <- cntyD[which(cntyD$timestep %in% t_use),]
-    
+
     # calculate residuals
     if(sum(!is.na(cntyDT2$med.x))>1){
       if(sum(is.na(cntyDT2$method)) != nrow(cntyDT2)){
         lm1 <- lm(cntyDT2$med.x ~ cntyDT2$timestep)
-        work_idxs <- which(!is.na(cntyDT2$method)) 
+        work_idxs <- which(!is.na(cntyDT2$method))
         #direction <- ifelse(lm1$residuals>0, 1, -1)
         #out_mn[i, j] <- mean(lm1$residuals[(work_idxs+1)], na.rm=TRUE) # na.rm to deal with situations when work was done in the last timestep
         #out_md[i, j] <- median(lm1$residuals[work_idxs+1], na.rm=TRUE)
         # out_direction[i, j] <- mean(direction[work_idxs+1])
-        
+
         # separate the work indices by method
         work1 <- which(cntyDT2$method == 1)
         work2 <- which(cntyDT2$method == 2)
@@ -944,11 +944,11 @@ for(i in seq_along(u_fips)){
         out3[i,j] <- median(lm1$residuals[work3], na.rm=TRUE)
         out4[i,j] <- median(lm1$residuals[work4], na.rm=TRUE)
         out5[i,j] <- median(lm1$residuals[work5], na.rm=TRUE)
-        
+
         # just collect the slope from each county in each window
         slp[i,j] <- lm1$coefficients[1]
-        
-        
+
+
         # only calculate the difference from previous step to work step
         dif1[i, j] <- median(cntyDT2$med.x[(work1-1)] - cntyDT2$med.x[work1], na.rm=TRUE)
         dif2[i, j] <- median(cntyDT2$med.x[(work2-1)] - cntyDT2$med.x[work2], na.rm=TRUE)
@@ -1007,11 +1007,11 @@ ag_out <- function(
   else{
     #ag_on <- rowMeans(out_md3[,2:(ncol(out_md3)-1)], na.rm=TRUE)
     ag_on <- apply(out_md3, 1, function(x) median(x,na.rm=TRUE))
-    out_md_sum <- aggregate(ag_on ~ out_md3$state.x, 
+    out_md_sum <- aggregate(ag_on ~ out_md3$state.x,
                             FUN=function(x) quantile(x, c(0.025, 0.5, 0.975)))
     colnames(out_md_sum) <- c("state", "residual")
     out_md_sum2 <- data.frame(out_md_sum[,1], out_md_sum[,2], method=cap_methods[method])
-    
+
   }
   colnames(out_md_sum2) <- c("state", "lo", "med", "hi", "method")
   out_md_sum2 <- out_md_sum2[!(is.na(out_md_sum2$med)),]
@@ -1060,11 +1060,11 @@ dif5_sum <- ag_out(dif5, 5)
   axis(1)
   axis(2, las=2)
   mtext(paste0("Capture method = ", cap_methods[1]), line=1)
-  
+
   # break out this method across all states -- for method 1
   states1 <- unique(out1v[,ncol(out1v)])
   mat1 <- matrix(1:30, nrow=6, ncol=5)
-  
+
   pdf(paste0("./fitted_mods/fit20190416/residual_removal_plots/firearm.pdf"))
   layout(mat1)
   par(mar=c(3,2,0.1,0.1), oma=c(1,3.5,2,.6))
@@ -1083,19 +1083,19 @@ dif5_sum <- ag_out(dif5, 5)
     mtext(states1[j])
     if(j %% nrow(mat1) ==0 | j == length(states1)){
       axis(1)
-    } 
+    }
     else {
       axis(1, label=FALSE)
     }
-    
+
   }
   mtext("Residuals at timestep after work was completed",
-        side=2, outer=TRUE, 
+        side=2, outer=TRUE,
         cex=1.2, line=1)
   mtext("Timestep at end of moving window", side=1, outer=TRUE, line=-.4, cex=1.2)
   dev.off()
-  
-  
+
+
   # method 2
   out2v <- out2_sum$full[rowSums(is.na(out2_sum$full)) != (ncol(out2_sum$full)-2),]
   out2v <- data.frame(out2v[,1], scale(out2v[,2:(ncol(out2v)-1)]), out2v[, ncol(out2v)])
@@ -1110,12 +1110,12 @@ dif5_sum <- ag_out(dif5, 5)
   axis(1)
   axis(2, las=2)
   mtext(paste0("Capture method = ", cap_methods[2]), line=1)
-  
-  
+
+
   # break out this method across all states -- for method 2
   states2 <- unique(out2v[,ncol(out2v)])
   mat2 <- matrix(1:6, nrow=3, ncol=2)
-  
+
   pdf(paste0("./fitted_mods/fit20190416/residual_removal_plots/fixed_wing.pdf"))
   layout(mat2)
   par(mar=c(3,2,0.1,0.1), oma=c(1,3.5,2,.6))
@@ -1134,18 +1134,18 @@ dif5_sum <- ag_out(dif5, 5)
     mtext(states2[j])
     if(j %% nrow(mat2) ==0 | j == length(states2)){
       axis(1)
-    } 
+    }
     else {
       axis(1, label=FALSE)
     }
-    
+
   }
   mtext("Residuals at timestep after work was completed",
-        side=2, outer=TRUE, 
+        side=2, outer=TRUE,
         cex=1.2, line=1)
   mtext("Timestep at end of moving window", side=1, outer=TRUE, line=-.4, cex=1.2)
   dev.off()
-  
+
   # make plot of residual over time for each county
   out3v <- out3_sum$full[rowSums(is.na(out3_sum$full)) != (ncol(out3_sum$full)-2),]
   #out3v <- out3_sum$full[rowSums(is.na(out3_sum$full)) < 50,]
@@ -1161,11 +1161,11 @@ dif5_sum <- ag_out(dif5, 5)
   axis(1)
   axis(2, las=2)
   mtext(paste0("Capture method = ", cap_methods[3]), line=1)
-  
+
   # break out this method across all states -- for method 3
   states3 <- unique(out3v[,ncol(out3v)])
   mat3 <- matrix(1:8, nrow=4, ncol=2)
-  
+
   pdf(paste0("./fitted_mods/fit20190416/residual_removal_plots/helicopter.pdf"))
   layout(mat3)
   par(mar=c(3,2,0.1,0.1), oma=c(1,3.5,2,.6))
@@ -1184,19 +1184,19 @@ dif5_sum <- ag_out(dif5, 5)
     mtext(states3[j])
     if(j %% 4 ==0 | j == length(states3)){
       axis(1)
-    } 
+    }
     else {
       axis(1, label=FALSE)
     }
-    
+
   }
   mtext("Residuals at timestep after work was completed",
-        side=2, outer=TRUE, 
+        side=2, outer=TRUE,
         cex=1.2, line=1)
   mtext("Timestep at end of moving window", side=1, outer=TRUE, line=-.4, cex=1.2)
   dev.off()
-  
-  
+
+
   # make plot of residual over time for each county
   out4v <- out4_sum$full[rowSums(is.na(out4_sum$full)) != (ncol(out4_sum$full)-2),]
   out4v <- data.frame(out4v[,1], scale(out4v[,2:(ncol(out4v)-1)]), out4v[, ncol(out4v)])
@@ -1211,11 +1211,11 @@ dif5_sum <- ag_out(dif5, 5)
   axis(1)
   axis(2, las=2)
   mtext(paste0("Capture method = ", cap_methods[4]), line=1)
-  
+
   # break out this method across all states -- for method 4
   states4 <- unique(out4v[,ncol(out4v)])
   mat4 <- matrix(1:30, nrow=6, ncol=5)
-  
+
   pdf(paste0("./fitted_mods/fit20190416/residual_removal_plots/snare.pdf"))
   layout(mat4)
   par(mar=c(3,2,0.1,0.1), oma=c(1,3.5,2,.6))
@@ -1234,18 +1234,18 @@ dif5_sum <- ag_out(dif5, 5)
     mtext(states4[j])
     if(j %% nrow(mat4) ==0 | j == length(states4)){
       axis(1)
-    } 
+    }
     else {
       axis(1, label=FALSE)
     }
-    
+
   }
   mtext("Residuals at timestep after work was completed",
-        side=2, outer=TRUE, 
+        side=2, outer=TRUE,
         cex=1.2, line=1)
   mtext("Timestep at end of moving window", side=1, outer=TRUE, line=-.4, cex=1.2)
   dev.off()
-  
+
   # make plot of residual over time for each county
   out5v <- out5_sum$full[rowSums(is.na(out5_sum$full)) != (ncol(out5_sum$full)-2),]
   out5v <- data.frame(out5v[,1], scale(out5v[,2:(ncol(out5v)-1)]), out5v[, ncol(out5v)])
@@ -1260,11 +1260,11 @@ dif5_sum <- ag_out(dif5, 5)
   axis(1)
   axis(2, las=2)
   mtext(paste0("Capture method = ", cap_methods[5]), line=1)
-  
+
   # break out this method across all states
   states5 <- unique(out5v[,ncol(out5v)])
   mat5 <- matrix(1:36, nrow=6, ncol=6)
-  
+
   pdf(paste0("./fitted_mods/fit20190416/residual_removal_plots/trap.pdf"))
   layout(mat5)
   par(mar=c(3,2,0.1,0.1), oma=c(1,3.5,2,.6))
@@ -1283,14 +1283,14 @@ dif5_sum <- ag_out(dif5, 5)
     mtext(states5[j])
     if(j %% 6 ==0 | j == length(states5)){
       axis(1)
-    } 
+    }
     else {
       axis(1, label=FALSE)
     }
-    
+
   }
   mtext("Residuals at timestep after work was completed",
-        side=2, outer=TRUE, 
+        side=2, outer=TRUE,
         cex=1.2, line=1)
   mtext("Timestep at end of moving window", side=1, outer=TRUE, line=-.4, cex=1.2)
   dev.off()
@@ -1306,7 +1306,7 @@ for(i in seq_along(u_fips)){
   for(j in 1:n_windows){
     t_use <- timesteps[j:(j+t_year)]
     cntyDT2 <- cntyD[which(cntyD$timestep %in% t_use),]
-    
+
     # calculate slope
     if(sum(!is.na(cntyDT2$med))>1){
       if(sum(is.na(cntyDT2$method)) != nrow(cntyDT2)){
@@ -1337,7 +1337,7 @@ for(i in 1:length(states)){
   stD <- slp3[slp3$state.x == states[i],]
   std2 <- stD[rowSums(is.na(stD)) != (ncol(stD)-2), ]
   if(nrow(std2) > 0){
-    plot((t_year+1):173, unlist(std2[1,(2:(ncol(std2)-2))]), type="l", 
+    plot((t_year+1):173, unlist(std2[1,(2:(ncol(std2)-2))]), type="l",
          ylim=c(min(std2[,(2:(ncol(std2)-2))], na.rm=TRUE), max(std2[,(2:(ncol(std2)-2))], na.rm=TRUE)),
          axes=FALSE)
     for(j in 2:nrow(std2)){
@@ -1347,7 +1347,7 @@ for(i in 1:length(states)){
     mtext(states[i])
     abline(h=0, col="dark grey", lty=3, lwd=1.5)
   }
-  
+
   # adding a rug for when work was done by each method
   # I can use out1_md if I run this using [work] (instead of [work+1])
   for(k in 5:1){
@@ -1359,7 +1359,7 @@ for(i in 1:length(states)){
     }else{
       rug(work_cols, col=rug_cols[k], ticksize=.05, lwd=.5)
     }
-    
+
   }
 }
 mtext(paste0("slope of abundance over time for ", t_year, " timesteps"), 2, outer=TRUE, cex=1.5)
@@ -1383,7 +1383,7 @@ dens_eff <- merge(dens, ag_eff2, by=c("FIPS2", "timestep"))
 
 # set up some plot parameters
 color.gradient <- function(x, colors=c("red","yellow","green"), colsteps=100) {
-  return(colorRampPalette(colors,interpolate = c("spline"))(colsteps)[ findInterval(x, seq(min(x),max(x), length.out=colsteps)) ] 
+  return(colorRampPalette(colors,interpolate = c("spline"))(colsteps)[ findInterval(x, seq(min(x),max(x), length.out=colsteps)) ]
   )
 }
 range01 <- function(x){(x-min(x))/(max(x)-min(x))}
@@ -1403,7 +1403,7 @@ slopeBeforeAfterControl <- function(
   heavy <- quantile(ag_eff$effort, heavy_q) # control work >= to this amount will be used
   ag_eff2 <- ag_eff[ag_eff$effort >= heavy,]
   dens_eff <- merge(dens, ag_eff2, by=c("FIPS2", "timestep"))
-  
+
   timesteps <- min(timestep_df$timestep):max(timestep_df$timestep)
   n_windows <- length(timesteps)-t_year
   u_fips <- unique(dens_eff$FIPS) # this is different here because it is only places with high effort
@@ -1420,11 +1420,11 @@ slopeBeforeAfterControl <- function(
           cntyD_bef <- cntyD[cntyD$timestep %in% t_before,]
           lm_bef <- lm(cntyD_bef$med ~ cntyD_bef$timestep)
           slp_bef[i,j] <- lm_bef$coefficients[2]
-          
+
           cntyD_aft <- cntyD[cntyD$timestep %in% t_after,]
           lm_aft <- lm(cntyD_aft$med ~ cntyD_aft$timestep)
           slp_aft[i,j] <- lm_aft$coefficients[2]
-          
+
         }
       }
       # if calculating how long a slope stays negative in a county after control
@@ -1452,18 +1452,18 @@ slopeBeforeAfterControl <- function(
           }
           num_neg_times <- sum(slope_after[j, ] < 0, na.rm=TRUE) + t_year -1 # number of timesteps where it stayed negative
           time_negative[i,j] <- ifelse(num_neg_times == t_year-1, 0, num_neg_times)
-        } 
-        
+        }
+
       }# close if how long negative
-      
+
     } # close j
-    
+
     # print progress
     if(i %% 100 == 0){
       print(paste0(i," of ", length(u_fips), " counties complete"))
     }
   }
-  
+
   # control output by options
   if(how_long_negative){
     time_neg <- data.frame(time_negative, u_fips)
@@ -1476,7 +1476,7 @@ slopeBeforeAfterControl <- function(
     } else{
       slp_df <- slp_bef-slp_aft
     }
-    
+
     slp_bef2 <- data.frame(slp_bef, u_fips)
     slp_bef3 <- merge(slp_bef2, all_state, by.x="u_fips", by.y="fips")
     slp_aft2 <- data.frame(slp_aft, u_fips)
@@ -1484,16 +1484,16 @@ slopeBeforeAfterControl <- function(
     slp_df <- slp_bef-slp_aft
     slp_df2 <- data.frame(slp_df, u_fips)
     slp_df3 <-  merge(slp_df2, all_state, by.x="u_fips", by.y="fips")
-    
-    
-    
-    
+
+
+
+
     # compare slope before control with slope after
     # plot(slp_bef3[,3], slp_aft3[,3])
     # quantile(slp_bef, c(0.025, 0.5, 0.975), na.rm=TRUE)
     # quantile(slp_aft, c(0.025, 0.5, 0.975),na.rm=TRUE)
     # quantile(slp_df, c(0.025, 0.5, 0.975),na.rm=TRUE)
-    # 
+    #
     # compare slope before control with slope after
     states_BA <- unique(slp_bef3$state.x)
     BA_ag <- matrix(NA, nrow=length(states_BA), ncol=9)
@@ -1513,16 +1513,16 @@ slopeBeforeAfterControl <- function(
     #write_csv(BA_ag2, "./fitted_mods/fit20190416/effects_of_control/slopeBeforeAfterControl_3timesteps_25quant.csv")
     write_csv(BA_ag2, paste0("./fitted_mods/fit20190416/effects_of_control/slopeBeforeAfterControl_", t_year, "timesteps_", (heavy_q * 100), "quant.csv"))
     print(data.frame(BA_ag2$states_BA, BA_ag2$before_med, BA_ag2$after_med, BA_ag2$diff_med))
-    
+
     # look at difference in slope in individual counties
     slp_df_cnty <- apply(slp_df, 1, FUN=function(x) median(x, na.rm=TRUE))
     dif_cnty <- data.frame(u_fips, slp_df_cnty, slp_df3[,ncol(slp_df3)])
     colnames(dif_cnty) <- c("FIPS", "med.slp.dif", "state")
-    
+
     # if(output == "diff_cnty"){
     #   return(dif_cnty)
     # }
-    
+
     #-- make map plot
     # make a map of change before and after control
     data(county.fips)
@@ -1532,7 +1532,7 @@ slopeBeforeAfterControl <- function(
                               color=grey(range01(y)),
                               fips = as.integer(as.numeric(as.character(dif_cnty$FIPS))))
     counties <- merge(county.fips, df_col_cnty, by="fips", all.x=TRUE)
-    
+
     # set up pallete
     # determine zero point
     lwr.mid <- round(mean(y<0)*num.colors)
@@ -1543,31 +1543,31 @@ slopeBeforeAfterControl <- function(
     red.palette <- color.gradient(1:upper.mid,colors=red.end.pnts)
     # Combine Palettes into one
     red.blue.palette <- c(rev(blue.palette),red.palette)
-    
+
     # apply colors to data
     h1 <- c(seq(min(dif_cnty$med.slp.dif), -0.000001, length.out=lwr.mid),
             seq( 0.000001, max(dif_cnty$med.slp.dif),length.out=upper.mid))
     ints <- findInterval(counties$value, h1)
     newcol <- ifelse(is.na(ints), rgb(0,0,0,alpha=0),
                      red.blue.palette[ints])
-    
+
     if(output == "diff_cnty"){
       return(list(dif_cnty=dif_cnty,
                   newcol=newcol
       ))
     }
   }
-  
-  
-  
-  
+
+
+
+
   # pdf(paste0("./fitted_mods/fit20190416/effects_of_control/slopeBeforeAfterControl_", t_year, "timesteps_", (heavy_q * 100), "quant.pdf"))
   # plot1 <- map('state',lwd=2,col="black") # states
   # map('county', fill=TRUE, col=newcol,lty=0, add=TRUE) # data
   # title(main="Change in wild pig abundance after control", line=1)
   # print(plot1)
   #  dev.off()
-  
+
 }
 dif_cnty <- slopeBeforeAfterControl(heavy_q =.95)
 
@@ -1580,7 +1580,7 @@ for(i in seq_along(qs)){
     dif_cnty <- slopeBeforeAfterControl(t_year=times[j],
                                         heavy_q =qs[i],
                                         percent_change = TRUE)
-    
+
     pdf(paste0("./fitted_mods/fit20190416/effects_of_control/slopeBeforeAfterControl_", times[j], "timesteps_", (qs[i] * 100), "quant.pdf"))
     map('state',lwd=2,col="black") # states
     map('county', fill=TRUE, col=dif_cnty$newcol,lty=0, add=TRUE) # data
@@ -1588,7 +1588,7 @@ for(i in seq_along(qs)){
     #legend("bottomright",legend=c("percent change after control"))
     #plot(rep(1,num.colors),1:num.colors, col=red.blue.palette, pch=15, cex=5, axes=FALSE,xlab="",ylab="")
     dev.off()
-    
+
   }
 }
 
@@ -1616,7 +1616,7 @@ newcol <- ifelse(is.na(ints), rgb(0,0,0,alpha=0),
 pdf(paste0("./fitted_mods/fit20190416/effects_of_control/monthsNegSlope_max.pdf"))
 mat1 <- matrix(c(1,1,2,2,1,1,2,2), byrow = TRUE, nrow=2, ncol=4)
 layout(mat1)
-maps::map('state',lwd=2,col="black") 
+maps::map('state',lwd=2,col="black")
 maps::map('county', fill=TRUE, col=newcol,lty=0, add=TRUE) # data
 title(main="Maximum number of months that abundance\n decreases following control", line=1)
 #legend("bottomright", legend=c(0, seq(1,21, by=2)), col=green.palette[c(TRUE, FALSE)], horiz = FALSE, fill = newcol)
@@ -1643,7 +1643,7 @@ for(i in 1:10){
   pdf(paste0("./fitted_mods/fit20190416/effects_of_control/monthsNegSlope_controlEffortNum", i,".pdf"))
   mat1 <- matrix(c(1,1,2,2,1,1,2,2), byrow = TRUE, nrow=2, ncol=4)
   layout(mat1)
-  maps::map('state',lwd=2,col="black") 
+  maps::map('state',lwd=2,col="black")
   maps::map('county', fill=TRUE, col=newcol,lty=0, add=TRUE) # data
   title(main=paste0("Number of months that abundance decreases\n following the ", toOrdinal(i), " control operation in county"), line=1)
   #legend("bottomright", legend=c(0, seq(1,21, by=2)), col=green.palette[c(TRUE, FALSE)], horiz = FALSE, fill = newcol)
@@ -1672,7 +1672,7 @@ for(i in 1:9){
   #pdf(paste0("./fitted_mods/fit20190416/effects_of_control/monthsNegSlope_controlEffortNum", i,".pdf"))
   #mat1 <- matrix(c(1,1,2,2,1,1,2,2), byrow = TRUE, nrow=2, ncol=4)
   #layout(mat1)
-  maps::map('state',lwd=2,col="black") 
+  maps::map('state',lwd=2,col="black")
   maps::map('county', fill=TRUE, col=newcol,lty=0, add=TRUE) # data
   title(main=paste0("Number of months that abundance decreases\n following the ", toOrdinal(i), " control operation in county"), line=1)
 }
@@ -1690,7 +1690,7 @@ perC <- function(x,y){
 timesteps <- timestep_df$timestep
 firstPositive <- matrix(NA, nrow=length(u_fips), ncol=length(timesteps))
 btwnControls <- function(
-  
+
   slope=FALSE
 ){
   for(i in seq_along(u_fips)){
@@ -1705,30 +1705,30 @@ btwnControls <- function(
         if(j != max(seq_along(controlTimes))){
           first <- controlTimes[j]
           last <- controlTimes[j+1]
-          
+
           perChange <- rep(NA, (last-first))
           for(k in (first+1):last){
-            perChange[which((first+1):last %in% k)] <- 
+            perChange[which((first+1):last %in% k)] <-
               perC(x=mean(cntyD[cntyD$timestep==first, "med.x"]),
                    y=mean(cntyD[cntyD$timestep==k, "med.x"]))
-          
-          } 
+
+          }
           firstPositive[i,j] <- which(perChange > 0)[1] # the first positive percent change from that control time
-          
+
         } else{
           first <- controlTimes[j]
           last <- max(timesteps)
           perChange <- rep(NA, (last-first))
           for(k in (first+1):last){
-            perChange[which((first+1):last %in% k)] <- 
+            perChange[which((first+1):last %in% k)] <-
               perC(x=mean(cntyD[cntyD$timestep==first, "med.x"]),
                    y=mean(cntyD[cntyD$timestep==k, "med.x"]))
-            
+
           }
           firstPositive[i,j] <- which(perChange > 0)[1] # the first positive percent change from that control time
-          
+
         }
-        
+
       } # close j
     }
     if(i %% 100 == 0){
@@ -1757,7 +1757,7 @@ t_red_df <- data.frame(FIPS=u_fips,
                        state = tR2$state.x)
 #counties <- merge(county.fips, t_red_df, by="fips", all.x=TRUE)
 h1 <- seq(0, max(t_red_df$value, na.rm=TRUE), length.out = 20)
-h1 <- seq(0, 5, #max(t_red_df$value, na.rm=TRUE), 
+h1 <- seq(0, 5, #max(t_red_df$value, na.rm=TRUE),
           length.out = 20)
 h1[length(h1)] <- max(t_red_df$value, na.rm=TRUE)
 #h1 <- c(seq(0, 5, by=.5), max(t_red_df$value, na.rm=TRUE))
@@ -1771,7 +1771,7 @@ CA <- t_red_df[t_red_df$state=="California",]
 # plot
 mat <- matrix(c(1,2), nrow=1)
 #pdf("./fitted_mods/fit20190416/effects_of_control/mean_months_neg_slope.pdf")
-maps::map('state',lwd=2,col="black", main="Mean number of months with \nnegative slope after control") 
+maps::map('state',lwd=2,col="black", main="Mean number of months with \nnegative slope after control")
 maps::map('county', fill=TRUE, col=newcol,lty=0, add=TRUE) # data
 mtext("Mean number of consecutive months with \ndecreasing population size after control", cex=2)
 #legend("bottomright", legend=0:20, fill=green.palette)
@@ -1780,7 +1780,7 @@ dev.off()
 pdf("./fitted_mods/fit20190416/effects_of_control/mean_months_neg_slope_legend.pdf")
 par(font=2)
 plot(rep(1,21),1:21, col=c(green.palette), pch=15, cex=5, axes=FALSE,xlab="",ylab="")
-axis(4, at=c(.8, 5, 8.5, 12.5, 16.5, 21.5), labels = c(0, 1,2, 3, 4, expression("">=5)), 
+axis(4, at=c(.8, 5, 8.5, 12.5, 16.5, 21.5), labels = c(0, 1,2, 3, 4, expression("">=5)),
      las=2, line=-10, tick=FALSE, pos=1.05, cex.axis=2)
 dev.off()
   #---------------------------------------------------------------
@@ -1792,7 +1792,7 @@ dev.off()
     num_st[i] <- length(st_index[[i]])
   }
   max(num_st) #==22
-  
+
   # how to get the indeces in a table
   set.seed(100)
   n <- 1000
@@ -1801,14 +1801,14 @@ dev.off()
   which(samps %in% tbl1)
   order(samps)[!duplicated(sort(samps))]
   split(seq_along(samps), samps)
-  
-  # make sure subtraction works how I want 
+
+  # make sure subtraction works how I want
   mat <- matrix(rpois(10, 2), nrow=10, ncol=20)
   vec <- t(replicate(nrow(mat), 1:20))
   (mat-vec)/vec
   apply(mat, 2, function(x){x-vec})
   sweep(mat[,1:ncol(mat)], 2, function(x) {x-vec})
-  
+
   # test how to extract data I want for each survey
   n <- 1000
   y_obs <- rpois(n, 3)
@@ -1822,14 +1822,14 @@ dev.off()
   for(i in 1:n_surveys){
     surv_list[[i]] <- which(survey_idx %in% survey_num[i])
   }
-  
+
   # check that adding spatiotemporal data to y_sum worked
   unique(st_d$county_index)
   data.frame(y_sum[y_sum$county_idx== 6,])
   data.frame(st_d[st_d$county_index == 6, ])
-  
+
   # I need to break this out by timestep. Otherwise, there are multiple values per county
-  df_map <- data.frame(county=as.integer(d2009$FIPS), value=d2009$medDens, 
+  df_map <- data.frame(county=as.integer(d2009$FIPS), value=d2009$medDens,
                        color=grey(d2009$medDens/max(d2009$medDens)))
   counties <- merge(county.fips, df_map, by.x="fips", by.y="county", all.x=TRUE)
   cc <- counties[!is.na(counties$value), ]
@@ -1837,12 +1837,12 @@ dev.off()
   #postscript("./fig/densMap_20190410.eps")
   #map("county", fill=TRUE, col=counties$color)
   #dev.off()
-  
+
   # plot density
   par(mar=c(5,8,4,3))
   plot(quant[3,1], 1, ylim=c(.5, 6.5),xlim=c(min(quant), max(quant)),
-       axes=FALSE, 
-       xlab="", 
+       axes=FALSE,
+       xlab="",
        ylab="", cex=1, pch=16)
   segments(x0=quant[2,1], x1=quant[4,1], y0=1, lwd=lwd50)
   segments(x0=quant[1,1], x1=quant[5,1], y0=1, lwd=lwd95)
@@ -1856,8 +1856,8 @@ dev.off()
   axis(2, at=1:6, labels=c("all methods", "firearms", "fixed wing", "helicopter", "snare", "trap"), las=2)
   mtext(paste0("reduction of wild pig density at a property\n by next removal effort within ", max_months, " months"), 1,
         line=3)
-  
-  # look at a specific county and abundance vs effort 
+
+  # look at a specific county and abundance vs effort
   max_months <- 3 # the max number of months in which to assess the effect of removal
   u_fips <- unique(y_sum$FIPS)
   for(i in u_fips){
@@ -1866,7 +1866,7 @@ dev.off()
       print(paste0(i, "--" ,nrow(tmp)))
     }
   }
-  
+
   # do this for all properties
   max_months <- 1 # the max number of months in which to assess the effect of removal
   min_months <- 3 # the minimum number of months in which to assess the effect of removal
@@ -1896,7 +1896,7 @@ dev.off()
             # slope for all methods combined
             lm1 <- lm(prop1$diff ~ prop1$scaled_effort)
             reduce_df[i,1] <- lm1$coefficients[2]
-            
+
             # now look at the slope for each method
             for(j in seq_along(cap_methods)){
               prop1_meth <- prop1[prop1$method==j, ]
@@ -1907,16 +1907,16 @@ dev.off()
                 lm2 <- lm(prop1_meth$diff ~ prop1_meth$scaled_effort)
                 reduce_df[i,(j+1)] <- lm2$coefficients[2]
               }
-            } 
+            }
           }
         }
-        
+
       }
-      
+
     }
   }
-  
-  
+
+
   # look at slope and residuals in just Texas
   densTX <- dens3[dens3$state.x=="Texas",]
   u_fips <- unique(densTX$FIPS)[!is.na(unique(densTX$FIPS))]
@@ -1930,7 +1930,7 @@ dev.off()
       if(sum(!is.na(cntyDT2$med.x))>1){
         if(sum(is.na(cntyDT2$method)) != nrow(cntyDT2)){
           lm1 <- lm(cntyDT2$med.x ~ cntyDT2$timestep)
-          work_idxs <- which(!is.na(cntyDT2$method)) 
+          work_idxs <- which(!is.na(cntyDT2$method))
           direction <- ifelse(lm1$residuals>0, 1, -1)
           out_mn[i, j] <- mean(lm1$residuals[(work_idxs+1)], na.rm=TRUE) # na.rm to deal with situations when work was done in the last timestep
           out_md[i, j] <- median(lm1$residuals[work_idxs+1], na.rm=TRUE)
@@ -1950,7 +1950,7 @@ dev.off()
       if(sum(!is.na(cntyDT2$med.x))>1){
         if(sum(is.na(cntyDT2$method)) != nrow(cntyDT2)){
           lm1 <- lm(cntyDT2$med.x ~ cntyDT2$timestep)
-          work_idxs <- which(!is.na(cntyDT2$method)) 
+          work_idxs <- which(!is.na(cntyDT2$method))
           direction <- ifelse(lm1$residuals>0, 1, -1)
           #out_mn[i, j] <- mean(lm1$residuals[(work_idxs+1)], na.rm=TRUE) # na.rm to deal with situations when work was done in the last timestep
           out_md[i, j] <- median(lm1$residuals[work_idxs+1], na.rm=TRUE)
@@ -1959,4 +1959,4 @@ dev.off()
       }
     }
   }
-  
+

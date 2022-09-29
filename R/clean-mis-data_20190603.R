@@ -15,15 +15,17 @@ library(splines)
 library(lubridate)
 
 
-setwd("/project/iwctml/mtabak/APHIS/abundance/wild-pigs/")
+# setwd("/project/iwctml/mtabak/APHIS/abundance/wild-pigs/")
 outDir <- "./data/"
 
-setwd("/Users/mikeytabak/Desktop/APHIS/abundanceModeling/wild-pigs/")
+# setwd("/Users/mikeytabak/Desktop/APHIS/abundanceModeling/wild-pigs/")
+
+### structure so that wd is relative within the project!!
 
 # Cleaning the MIS data ---------------------------------------------------
 
 # read in the ecoregion data
-ecoregions <- readOGR(file.path('data', 'ecoregions'), 
+ecoregions <- readOGR(file.path('data', 'ecoregions'),
                       'Cnty.lower48.EcoRegions.Level2') %>%
   as.data.frame(stringsAsFactors = FALSE) %>%
   as_tibble
@@ -31,71 +33,73 @@ ecoregions <- readOGR(file.path('data', 'ecoregions'),
 
 # Load and process in situ data -------------------------------------------
 traps <- read_csv("data/insitu/feral.swine.effort.take.trap.ALL.daily.events.2021-03-25.csv") %>%
-  mutate(method = "trap", 
-         effort = trap.nights, 
-         y = Take, 
+  mutate(method = "trap",
+         effort = trap.nights,
+         y = Take,
          #ST_GSA_STATE_CD = ST_FIPS,
          ST_GSA_STATE_CD = ST_GSA_STATE_CD,
-         #CNTY_GSA_CNTY_CD = CNTY_FIPS, 
+         #CNTY_GSA_CNTY_CD = CNTY_FIPS,
          CNTY_GSA_CNTY_CD = CNTY_GSA_CNTY_CD,
          trap_count = trap.count) %>%
-  dplyr::select(CNTY_NAME, ST_GSA_STATE_CD, CNTY_GSA_CNTY_CD, start.date, end.date, 
-                AGRP_PRP_ID, method, effort, y, TOTAL.LAND, trap_count)
+  dplyr::select(CNTY_NAME, ST_GSA_STATE_CD, CNTY_GSA_CNTY_CD, start.date, end.date,
+                AGRP_PRP_ID, method, effort, y, TOTAL.LAND, trap_count) %>%
+  rename_with(tolower)
 
 aerial <- read_csv("data/insitu/feral.swine.effort.take.aerial.ALL.daily.events.2021-03-23.csv") %>%
   mutate(method = CMP_NAME,
          effort = Flight.Hours,
          y = Take,
          #ST_GSA_STATE_CD = ST_FIPS,
-         #CNTY_GSA_CNTY_CD = CNTY_FIPS, 
+         #CNTY_GSA_CNTY_CD = CNTY_FIPS,
          trap_count = VEHICLES) %>%
-  dplyr::select(CNTY_NAME, ST_GSA_STATE_CD, CNTY_GSA_CNTY_CD, 
+  dplyr::select(CNTY_NAME, ST_GSA_STATE_CD, CNTY_GSA_CNTY_CD,
                 Start.Date, End.Date, trap_count,
                 AGRP_PRP_ID, method, effort, y, TOTAL.LAND) %>%
-  rename(start.date = Start.Date,
-         end.date = End.Date) #%>%
+  rename_with(tolower)#%>%
   #separate(start.date, into = c('m', 'd', 'yr'), sep = '/') %>%
   # separate(start.date, into = c('yr', 'm', 'd'), sep = '-') %>%
-  # mutate(m = sprintf('%02d', as.numeric(m)), 
-  #        d = sprintf('%02d', as.numeric(d)), 
-  #        start.date = paste(yr, m, d, sep = '-'), 
+  # mutate(m = sprintf('%02d', as.numeric(m)),
+  #        d = sprintf('%02d', as.numeric(d)),
+  #        start.date = paste(yr, m, d, sep = '-'),
   #        start.date = as.Date(start.date)) %>%
   # dplyr::select(-m, -d, -yr) %>%
   # separate(end.date, into = c('m', 'd', 'yr'), sep = '/') %>%
-  # mutate(m = sprintf('%02d', as.numeric(m)), 
-  #        d = sprintf('%02d', as.numeric(d)), 
-  #        end.date = paste(yr, m, d, sep = '-'), 
+  # mutate(m = sprintf('%02d', as.numeric(m)),
+  #        d = sprintf('%02d', as.numeric(d)),
+  #        end.date = paste(yr, m, d, sep = '-'),
   #        end.date = as.Date(end.date)) %>%
   # dplyr::select(-m, -d, -yr)
 
-snares <- read_csv('data/insitu/feral.swine.effort.take.snare.ALL2018-02-23.csv') %>%
+snares <- read_csv('data/insitu/feral.swine.effort.take.snare.ALL.daily.events.2021-03-24.csv') %>%
   filter(!is.na(ST_NAME),
          !is.na(CNTY_NAME)) %>%
   mutate(method = 'snare',
          effort = trap.nights,
-         y = Take, 
-         ST_GSA_STATE_CD = ST_FIPS, 
-         CNTY_GSA_CNTY_CD = CNTY_FIPS, 
+         y = Take,
+         # ST_GSA_STATE_CD = ST_FIPS,
+         # CNTY_GSA_CNTY_CD = CNTY_FIPS,
          trap_count = trap.nights / event.length) %>%
-  dplyr::select(CNTY_NAME, ST_GSA_STATE_CD, CNTY_GSA_CNTY_CD, start.date, end.date, 
-                AGRP_PRP_ID, method, effort, y, 
-                TOTAL.LAND, trap_count)
+  dplyr::select(CNTY_NAME, ST_GSA_STATE_CD, CNTY_GSA_CNTY_CD, start.date, end.date,
+                AGRP_PRP_ID, method, effort, y,
+                TOTAL.LAND, trap_count) %>%
+  rename_with(tolower)
 
-firearms <- read_csv('data/insitu/feral.swine.effort.take.firearms.ALL2018-02-24.csv') %>%
-  filter(!is.na(ST_NAME), 
+firearms <- read_csv('data/insitu/feral.swine.effort.take.firearms.ALL.daily.events.2021-03-24.csv') %>%
+  filter(!is.na(ST_NAME),
          !is.na(CNTY_NAME)) %>%
-  mutate(method = 'firearms', 
-         effort = Hunt.Hours, 
-         y = Take, 
-         ST_GSA_STATE_CD = ST_FIPS, 
-         CNTY_GSA_CNTY_CD = CNTY_FIPS, 
-         Start.date = WT_WORK_DATE, 
-         End.date = WT_WORK_DATE, 
+  mutate(method = 'firearms',
+         effort = Hunt.Hours,
+         y = Take,
+         # ST_GSA_STATE_CD = ST_FIPS,
+         # CNTY_GSA_CNTY_CD = CNTY_FIPS,
+         Start.date = WT_WORK_DATE,
+         End.date = WT_WORK_DATE,
          trap_count = FIREARMS) %>%
-  dplyr::select(CNTY_NAME, ST_GSA_STATE_CD, CNTY_GSA_CNTY_CD, 
-                Start.date, End.date, 
-                AGRP_PRP_ID, method, effort, y, TOTAL.LAND, 
-                trap_count)
+  dplyr::select(CNTY_NAME, ST_GSA_STATE_CD, CNTY_GSA_CNTY_CD,
+                Start.date, End.date,
+                AGRP_PRP_ID, method, effort, y, TOTAL.LAND,
+                trap_count) %>%
+  rename_with(tolower)
 
 # set all column names to lower case
 names(traps) <- tolower(names(traps))
@@ -106,10 +110,10 @@ names(aerial) <- tolower(names(aerial))
 
 # Merge all of the take data into one data frame
 insitu <- full_join(traps, firearms) %>%
-  full_join(snares) %>% 
+  full_join(snares) %>%
   full_join(aerial) %>%
   distinct %>%
-  mutate(insitu_id = 1:n(), 
+  mutate(insitu_id = 1:n(),
          method = tolower(method)) %>%
   filter(!is.na(y))
 write_rds(insitu, paste0(outDir, 'insitu.rds'))
@@ -117,33 +121,35 @@ write_rds(insitu, paste0(outDir, 'insitu.rds'))
 
 
 # resolve duplicate property values - when there are multiple values, take max
+
+# why are we taking the max property value when there are duplicate records?
 property_area_df <- distinct(insitu, agrp_prp_id, total.land) %>%
   group_by(agrp_prp_id) %>%
-  summarize(n_areas = length(unique(total.land)), 
-            property_area_acres = max(total.land, na.rm = TRUE), 
+  summarize(n_areas = length(unique(total.land)),
+            property_area_acres = max(total.land, na.rm = TRUE),
             # properties with all NA areas get -Inf
             # but the following line changes -Inf to NA
-            property_area_acres = ifelse(is.infinite(property_area_acres), 
-                                         NA, 
-                                         property_area_acres), 
+            property_area_acres = ifelse(is.infinite(property_area_acres),
+                                         NA,
+                                         property_area_acres),
             property_area_km2 = 0.00404686 * property_area_acres) %>%
-  ungroup %>% 
+  ungroup %>%
   arrange(property_area_acres)
-#property_area_df <- property_area_df[property_area_df$property_area_km2 > 1, ] 
+#property_area_df <- property_area_df[property_area_df$property_area_km2 > 1, ]
 
 # merge property areas back into insitu data, filter on area
 insitu <- insitu %>%
   left_join(property_area_df) %>%
-  filter(!is.na(property_area_acres), 
-         property_area_km2 >= 1.8, 
+  filter(!is.na(property_area_acres),
+         property_area_km2 >= 1.8,
          effort > 0)
 
 # fetch all fips data from census
-usa_fips <- read_csv("data/fips/national_county.txt", 
-                     col_names = c("state", "statefp", "countyfp", 
-                                   "countyname", "classfp"), 
+usa_fips <- read_csv("data/fips/national_county.txt",
+                     col_names = c("state", "statefp", "countyfp",
+                                   "countyname", "classfp"),
                      comment = '#') %>%
-  mutate(st_gsa_state_cd = parse_number(statefp), 
+  mutate(st_gsa_state_cd = parse_number(statefp),
          cnty_gsa_cnty_cd = parse_number(countyfp))
 
 # merge fips data to insitu pig data
@@ -196,12 +202,12 @@ order_df <- clean_d %>%
   left_join(property_area_df) %>%
   distinct %>%
   rowwise %>%
-  mutate(midpoint = ifelse(start.date == end.date, 
-                           as.numeric(start.date), 
-                           as.numeric(start.date) + 
+  mutate(midpoint = ifelse(start.date == end.date,
+                           as.numeric(start.date),
+                           as.numeric(start.date) +
                              (as.numeric(end.date) - as.numeric(start.date)) / 2)
          ) %>%
-  ungroup 
+  ungroup
 
 # impose stochastic ordering of events by adding jitter
 # we are assuming the following order of events when the events have the same midpoint
@@ -224,9 +230,9 @@ for (i in 1:nrow(order_df)) {
 order_df <- order_df %>%
   ungroup %>%
   group_by(st_gsa_state_cd, cnty_name, countyfp, agrp_prp_id, timestep) %>%
-  mutate(order = order(jittered_midpoint), 
-         has_multi = any(order > 1), 
-         any_ties = any(duplicated(jittered_midpoint)), 
+  mutate(order = order(jittered_midpoint),
+         has_multi = any(order > 1),
+         any_ties = any(duplicated(jittered_midpoint)),
          n_survey = n()) %>%
   arrange(st_gsa_state_cd, cnty_name, countyfp, agrp_prp_id, timestep, order) %>%
   ungroup()
@@ -239,7 +245,7 @@ clean_d <- clean_d %>%
 # next, link the counties in the shapefile to the counties in the insitu data
 shp <- readOGR(file.path("data", "counties"), "dtl.cnty.lower48.meters")
 
-# Create a neighborhood adjacency matrix 
+# Create a neighborhood adjacency matrix
 IDs <- row.names(as(shp, "data.frame"))
 
 county_df <- shp@data %>%
@@ -248,19 +254,19 @@ county_df <- shp@data %>%
   rename(statefp = STATE_FIPS, countyfp = CNTY_FIPS) %>%
   right_join(usa_fips) %>%
   filter(state != 'AK') %>%
-  mutate(county_fips_factor = factor(countyfp), 
-         countyname = gsub("County", "", x = countyname), 
-         countyname = tolower(countyname), 
-         countyname = trimws(countyname)) 
+  mutate(county_fips_factor = factor(countyfp),
+         countyname = gsub("County", "", x = countyname),
+         countyname = tolower(countyname),
+         countyname = trimws(countyname))
 
 # create a data set that merges surveys with county info
 d <- clean_d %>%
   mutate(countyname = trimws(cnty_name)) %>%
   left_join(county_df) %>%
   group_by(method) %>%
-  mutate(scaled_effort = c(scale(log(1 + effort))), 
-         FIPS = paste0(sprintf('%02d', st_gsa_state_cd), 
-                           sprintf('%03d', cnty_gsa_cnty_cd)), 
+  mutate(scaled_effort = c(scale(log(1 + effort))),
+         FIPS = paste0(sprintf('%02d', st_gsa_state_cd),
+                           sprintf('%03d', cnty_gsa_cnty_cd)),
          Year = as.numeric(substr(start.date, 1, 4))) %>%
   ungroup
 
@@ -273,7 +279,7 @@ crop_covs <- 'data/covariates/FINAL.Process.Model.crop.acerage.08Jan2018.csv' %>
   read_csv %>%
   dplyr::select(State, FIPS, Group_Name, mean.Prop.Crop) %>%
   spread(Group_Name, mean.Prop.Crop)
-colnames(crop_covs) <- c("State", "FIPS", "Cereals", 
+colnames(crop_covs) <- c("State", "FIPS", "Cereals",
                          "Fruit.Nuts", "Other" ,"Root.Tuber", "Vegetables.Melons")
 
 timeVar1 <- 'data/covariates/TimeVaryingCompletedPredictors/FINAL.Process.Model.time.varying.crop.acerage.22Dec2017.csv' %>%
@@ -312,7 +318,7 @@ timeVar2 <- 'data/covariates/TimeVaryingCompletedPredictors/FINAL.Process.Model.
   #dplyr::select(state_name, fips, year, month, precip, tmin, tmax)
 timeVar2$FIPS <- as.character(timeVar2$fips)
 timeVar2$month <- as.integer(timeVar2$month)
-#---figure out where NAs are coming from -- NAs are because some counties don't have 
+#---figure out where NAs are coming from -- NAs are because some counties don't have
 #--- data for these covariates in csv
 # crop_covs1 <- read.csv('data/covariates/FINAL.Process.Model.crop.acerage.08Jan2018.csv')[,1:6]
 # crop_covs <- crop_covs1 %>%
@@ -324,14 +330,14 @@ timeVar2$month <- as.integer(timeVar2$month)
 # dim(crops2)
 
 process_covs <- full_join(spatial_covs, crop_covs) %>%
-  mutate(c_hydroden = c(scale(log(.01 + total.hydro.density))), 
+  mutate(c_hydroden = c(scale(log(.01 + total.hydro.density))),
          c_hetero = c(scale(mean.habitat.hetero)),
          c_lewis = c(scale(mean.lewis.pig.density)),
-         c_carnrich = c(scale(mean.carnivore.richness)), 
-         c_crop = c(scale(mean.crop.cover)), 
-         c_pasture = c(scale(mean.pasture.cover)), 
+         c_carnrich = c(scale(mean.carnivore.richness)),
+         c_crop = c(scale(mean.crop.cover)),
+         c_pasture = c(scale(mean.pasture.cover)),
          c_evergreen = c(scale(evergreen)),
-         c_deciduous = c(scale(deciduous)), 
+         c_deciduous = c(scale(deciduous)),
          c_cerealCrop = c(scale(Cereals)),
          c_fruitNut = c(scale(Fruit.Nuts)),
          c_rootTuber = c(scale(Root.Tuber)),
@@ -342,7 +348,7 @@ assert_that(!any(is.na(process_covs$Cereals)))
 #-- process time varying covariates
 timeVar <- full_join(timeVar1, timeVar2) %>%
   mutate(c_cerealTV = c(scale(Cereals)),
-         c_fruitNutTV = c(scale(Fruit.Nuts)), 
+         c_fruitNutTV = c(scale(Fruit.Nuts)),
          #c_ndviTV = c(scale(ndvi)),
          c_precipTV = c(scale(prcp)),
          c_tminTV = c(scale(tmin)),
@@ -387,9 +393,9 @@ mean_impute <- function(x) {
 
 obs_covs <- obs_covs %>%
   group_by(STATE_NAME) %>%
-  mutate(rural.road.density = mean_impute(rural.road.density), 
-         prop.pub.land = mean_impute(prop.pub.land), 
-         mean.ruggedness = mean_impute(mean.ruggedness), 
+  mutate(rural.road.density = mean_impute(rural.road.density),
+         prop.pub.land = mean_impute(prop.pub.land),
+         mean.ruggedness = mean_impute(mean.ruggedness),
          mean.canopy.density = mean_impute(mean.canopy.density))
 
 # generate centered and scaled versions of these numeric variables
@@ -422,7 +428,7 @@ merged_d <- d %>%
 #apply(merged_d, 2, function(x) mean(is.na(x)))
 
 # merge all process covariates into survey data
-merged_d2 <- d %>% 
+merged_d2 <- d %>%
   left_join(process_covs2)
 #merged_d2 <- merge(d, process_covs2, all.x=TRUE, all.y=FALSE, by=c("FIPS", "timestep"))
 merged_d <- merged_d2[!is.na(merged_d2$c_pasture), ]
@@ -448,7 +454,7 @@ assert_that(!any(is.na(merged_d$LND010190D))) # area in sq miles
 survey_d <- merged_d %>%
   # mutate(idx = 1:n()) %>%
   mutate(idx=1:nrow(merged_d)) %>%
-  dplyr::select(idx, state, countyname, FIPS, start.date, end.date, timestep, order, 
+  dplyr::select(idx, state, countyname, FIPS, start.date, end.date, timestep, order,
          agrp_prp_id, trap_count, method, effort, y, scaled_effort, property_area_acres,
          order, Year,
          starts_with('c_'), LND010190D) %>%
@@ -465,19 +471,19 @@ set.seed(123)
 st_d <- survey_d %>%
   distinct(FIPS_timestep, FIPS, timestep, LND010190D, agrp_prp_id,
            property_factor,
-           c_hydroden, c_carnrich, c_crop, c_pasture, c_tree, 
-           c_evergreen, c_deciduous, c_cerealCrop, c_fruitNut, 
-           c_rootTuber, c_vegetablesMelons, 
-           c_lewis, c_hetero, 
+           c_hydroden, c_carnrich, c_crop, c_pasture, c_tree,
+           c_evergreen, c_deciduous, c_cerealCrop, c_fruitNut,
+           c_rootTuber, c_vegetablesMelons,
+           c_lewis, c_hetero,
            #c_cerealTV, c_fruitNutTV, c_ndviTV, c_precipTV, c_tminTV, c_tmaxTV,
            .keep_all=TRUE
            ) %>%
   #select(c_cerealTV, c_fruitNutTV, c_ndviTV, c_precipTV, c_tminTV, c_tmaxTV) %>%
   # split into training, dev, & validation sets
-  mutate(group = sample(c('train', 'test'), 
-                        size = n(), 
-                        #size=nrow(st_d), 
-                        replace = TRUE, 
+  mutate(group = sample(c('train', 'test'),
+                        size = n(),
+                        #size=nrow(st_d),
+                        replace = TRUE,
                         prob = c(.7, .3))) %>% # TODO: change these later
   left_join(property_area_df) %>%
   filter(property_area_km2 > 1) %>%
@@ -502,9 +508,9 @@ B <- as(listw, 'symmetricMatrix')
 # following http://mc-stan.org/users/documentation/case-studies/icar_stan.html
 
 # B-splines for abundance over time
-n_year <- length(unique(substr(timestep_df$start_dates, 
+n_year <- length(unique(substr(timestep_df$start_dates,
                                1, 4)))
-short_basis <- splines::bs(st_d$timestep, 
+short_basis <- splines::bs(st_d$timestep,
                   df = n_year * 2, intercept = TRUE)
 write_rds(short_basis, paste0(outDir, 'short_basis.rds'))
 
@@ -512,26 +518,26 @@ write_rds(short_basis, paste0(outDir, 'short_basis.rds'))
 current.na.action <- options('na.action')
 options(na.action='na.pass')
 X <- model.matrix(~ 0 +
-                    c_hydroden + 
+                    c_hydroden +
                     c_lewis +
-                    c_hetero + 
+                    c_hetero +
                     c_carnrich +
-                    c_crop + 
-                    c_pasture + 
+                    c_crop +
+                    c_pasture +
                     #c_evergreen + # exclude evergreen, deciduous, cereal crop, pasture, tmax, tmin, precip to reduce parameters
                     #c_deciduous +
-                    #c_cerealCrop + 
+                    #c_cerealCrop +
                     #c_fruitNut+ # exclude fruitNut, rootTuber, vegetablesMelons, CerealTV, fruitNutTV because too many NAs
-                    #c_rootTuber +  
-                    #c_vegetablesMelons + 
-                    #c_cerealTV + 
-                    #c_fruitNutTV + 
-                    #c_ndviTV + 
+                    #c_rootTuber +
+                    #c_vegetablesMelons +
+                    #c_cerealTV +
+                    #c_fruitNutTV +
+                    #c_ndviTV +
                     c_precipTV+
                     c_tminTV +
                     c_tmaxTV +
                     c_tree
-                  , 
+                  ,
                   data = st_d, na.action="na.pass")
 
 # find the number of NAs in each column
@@ -547,15 +553,15 @@ apply(X, 2, function(x){mean(is.na(x))})
 # Add observation covariates to the survey data
 survey_d <- survey_d %>%
   left_join(obs_covs) %>%
-  mutate(rural.road.density = mean_impute(rural.road.density), 
-         prop.pub.land = mean_impute(prop.pub.land), 
-         mean.ruggedness = mean_impute(mean.ruggedness), 
-         mean.canopy.density = mean_impute(mean.canopy.density), 
+  mutate(rural.road.density = mean_impute(rural.road.density),
+         prop.pub.land = mean_impute(prop.pub.land),
+         mean.ruggedness = mean_impute(mean.ruggedness),
+         mean.canopy.density = mean_impute(mean.canopy.density),
          c_road_den = center_scale(rural.road.density),
-         c_rugged = center_scale(mean.ruggedness), 
-         c_canopy = center_scale(mean.canopy.density), 
+         c_rugged = center_scale(mean.ruggedness),
+         c_canopy = center_scale(mean.canopy.density),
          county_index = match(FIPS, as.character(shp@data$FIPS)))
-  
+
 assert_that(!any(is.na(survey_d$c_road_den)))
 assert_that(!any(is.na(survey_d$county_index)))
 
@@ -570,17 +576,17 @@ assert_that(!any(is.na(survey_d$county_index)))
 get_survey_outputs <- function(survey_d, group) {
   assert_that(group %in% c('train', 'test'))
   group_d <- survey_d %>%
-    filter(FIPS_timestep %in% 
+    filter(FIPS_timestep %in%
              st_d$FIPS_timestep[st_d$group == group]) %>%
     left_join(property_area_df)
-  
+
   assert_that(all(group_d$property_area_km2 > 1))
   assert_that(nrow(group_d) < nrow(survey_d))
-  
+
   # Generate start and end indices for previous surveys ---------------------
   group_d$start <- 0
   group_d$end <- 0
-  
+
   pb <- txtProgressBar(max = nrow(group_d), style = 3)
   for (i in 1:nrow(group_d)) {
     if (group_d$order[i] > 1) {
@@ -595,23 +601,23 @@ get_survey_outputs <- function(survey_d, group) {
     setTxtProgressBar(pb, i)
   }
   close(pb)
-  
+
   # indices to match surveys to rows in the spatiotemporal data
   group_d <- group_d %>%
-    mutate(survey_idx = match(FIPS_timestep, st_d$FIPS_timestep), 
+    mutate(survey_idx = match(FIPS_timestep, st_d$FIPS_timestep),
            effort_per = effort / trap_count)
   assert_that(!any(is.na(group_d$survey_idx)))
   assert_that(!any(st_d$property_area_acres <= 0))
   assert_that(!any(survey_d$effort == 0))
-  
+
   # make a design matrix for detection probs
   X_p <- model.matrix(~ 0 +
-                        method * c_road_den + 
-                        method * c_rugged + 
-                        method * c_canopy, 
+                        method * c_road_den +
+                        method * c_rugged +
+                        method * c_canopy,
                       data = group_d)
   assert_that(identical(nrow(X_p), nrow(group_d)))
-  
+
   return(list(X_p = X_p,
               group_d = group_d))
 }
@@ -622,45 +628,45 @@ dev_d <- get_survey_outputs(survey_d, 'test')
 stan_d <- list(
   # spatiotemporal info
   n_st = nrow(st_d),
-  m_n = ncol(X), 
+  m_n = ncol(X),
   area_km2 = st_d$property_area_km2,
-  n_property = length(unique(st_d$agrp_prp_id)), 
-  property = as.numeric(st_d$property_factor), 
+  n_property = length(unique(st_d$agrp_prp_id)),
+  property = as.numeric(st_d$property_factor),
   X = X,
  # X_use = X_use,
   m_short = ncol(short_basis),
   X_short = short_basis,
   n_timestep = nrow(timestep_df),
   timestep = st_d$timestep,
-  
+
   # data for spatial indexing and ICAR priors
-  n_county = nrow(shp), 
+  n_county = nrow(shp),
   county_idx = st_d$county_index,
-  n_edges = length(B@i), 
+  n_edges = length(B@i),
   node1 = B@i + 1, # add one to offset zero-based index
   node2 = B@j + 1,
-  n_island = n_island, 
+  n_island = n_island,
   island_idx = island_idx,
-  
+
   # training data
-  n_survey = nrow(train_d$group_d), 
-  survey_idx = train_d$group_d$survey_idx, 
-  y = train_d$group_d$y, 
+  n_survey = nrow(train_d$group_d),
+  survey_idx = train_d$group_d$survey_idx,
+  y = train_d$group_d$y,
   scaled_effort = train_d$group_d$scaled_effort,
   trap_count = train_d$group_d$trap_count,
   m_p = ncol(train_d$X_p),
-  X_p = train_d$X_p, 
-  order = train_d$group_d$order, 
+  X_p = train_d$X_p,
+  order = train_d$group_d$order,
   survey_area_km2 = train_d$group_d$property_area_km2,
   p_county_idx = train_d$group_d$county_index,
   p_property_idx = as.numeric(train_d$group_d$property_factor),
-  start = train_d$group_d$start, 
-  end = train_d$group_d$end, 
-  n_method = length(levels(survey_d$method_factor)), 
-  method = as.numeric(train_d$group_d$method_factor), 
+  start = train_d$group_d$start,
+  end = train_d$group_d$end,
+  n_method = length(levels(survey_d$method_factor)),
+  method = as.numeric(train_d$group_d$method_factor),
   effort = train_d$group_d$effort,
   effort_per = train_d$group_d$effort_per,
-  
+
   # dev data
   n_survey_dev = nrow(dev_d$group_d),
   survey_idx_dev = dev_d$group_d$survey_idx,
@@ -687,7 +693,7 @@ no_missing_values <- number_missing_values == 0
 assert_that(no_missing_values)
 
 # make sure that all five methods made it in here
-assert_that(all(levels(train_d$group_d$method_factor) %in% 
+assert_that(all(levels(train_d$group_d$method_factor) %in%
     c("firearms", "fixed wing", "helicopter", "snare", "trap")))
 
 write_rds(merged_d, paste0(outDir, 'merged_d.rds'))
@@ -715,10 +721,10 @@ mat <- matrix(sample(vec, replace=TRUE),
 mat2 <- ifelse(is.na(mat), 0, 1)
 
 tmp <- readRDS("stan_d.rds")
-str(tmp)                 
+str(tmp)
 
 #*** fix time varying covariates by doing it without dplyr
-mergedTV <- merge(x=merged_d, y=timeVar, 
+mergedTV <- merge(x=merged_d, y=timeVar,
                   by=c("FIPS", "endYear", "endMonth"),
                   all=FALSE
                   #all.x=TRUE, all.y=FALSE
@@ -741,7 +747,7 @@ dim(process_covs)
 length(unique(process_covs$FIPS))
 # look at one county at a time
 length(unique(merged_d$FIPS))
-table(merged_d$FIPS) 
+table(merged_d$FIPS)
 fips <- 54041 # choosing FIPS=49027, 48217, 20011, 54041
 cc <- merged_d[merged_d$FIPS==fips, startsWith(colnames(merged_d), c("c_"))]
 apply(cc, 2, function(x) length(unique(x)))
