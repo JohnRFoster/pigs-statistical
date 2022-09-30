@@ -83,12 +83,46 @@ get_firearms <- function(file){
 join_insitu <- function(traps, firearms, snares, aerial){
 
   # Merge all of the take data into one data frame
-  full_join(traps, firearms) %>%
-    full_join(snares) %>%
-    full_join(aerial) %>%
-    distinct %>%
-    mutate(insitu_id = 1:n(),
-           method = tolower(method)) %>%
-    filter(!is.na(y))
+  insitu_all <- function(traps.data, firearms.data, snare.data, aerial.data){
+    full_join(traps.data, firearms.data) %>%
+      full_join(snares.data) %>%
+      full_join(aerial.data) %>%
+      distinct %>%
+      mutate(insitu_id = 1:n(),
+             method = tolower(method)) %>%
+      filter(!is.na(y))
   # write_rds(insitu, paste0(outDir, 'insitu.rds'))
+  }
+
+  insitu_df <- insitu_all(traps, firearms, snare, aerial)
+
+
+  # resolve duplicate property values - when there are multiple values, take max
+  # why are we taking the max property value when there are duplicate records?
+  resolve_duplicate <- function(insitu.data){
+    insitu.data |>
+      distinct(agrp_prp_id, total.land) %>%
+      group_by(agrp_prp_id) %>%
+      summarize(n_areas = length(unique(total.land)),
+                property_area_acres = max(total.land, na.rm = TRUE),
+                # properties with all NA areas get -Inf
+                # but the following line changes -Inf to NA
+                property_area_acres = ifelse(is.infinite(property_area_acres),
+                                             NA,
+                                             property_area_acres),
+                property_area_km2 = 0.00404686 * property_area_acres) %>%
+      ungroup %>%
+      arrange(property_area_acres)
+    #property_area_df <- property_area_df[property_area_df$property_area_km2 > 1, ]
+  }
+
+  property_area_df <- resolve_duplicate(insitu_df)
+
+  # merge property areas back into insitu data, filter on area
+  insitu_df %>%
+    left_join(property_area_df) %>%
+    filter(!is.na(property_area_acres),
+           property_area_km2 >= 1.8,
+           effort > 0)
+
 }
