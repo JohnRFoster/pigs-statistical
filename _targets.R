@@ -62,6 +62,7 @@ list(
 
   tar_target(
     name = insitu,
-    command = join_insitu(data.traps, data.firearms, data.snares, data.aerial))
+    command = join_insitu(data.traps, data.firearms, data.snares, data.aerial),
+    format = "rds")
 
 )
