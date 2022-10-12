@@ -374,7 +374,9 @@ process_covs2 <- left_join(y=process_covs, x=timeVar3, by=c("FIPS", "STATE_NAME"
 #as.data.frame(process_covs2[1:13,])
 #mean(is.na(process_covs2$c_hydroden))
 apply(process_covs2, 2, function(x) mean(is.na(x)))
+apply(process_covs, 2, function(x) mean(is.na(x)))
 process_covs3 <- process_covs2[!is.na(process_covs2$c_hydroden),]
+# process_covs2 <- process_covs[!is.na(process_covs$c_hydroden),] # JF added to deal with nit having the time-varying data
 apply(process_covs3, 2, function(x) mean(is.na(x)))
 #process_covs4 <- process_covs3[!is.na(process_covs3$c_ndviTV), ]
 process_covs2 <- process_covs3
@@ -490,12 +492,10 @@ st_d <- survey_d %>%
   left_join(ecoregions) %>%
   left_join(timestep_df)
 
-
-
 # Generate spatial neighbors ----------------------------------------------
 st_d <- st_d %>%
   mutate(county_index = match(FIPS, as.character(shp@data$FIPS)))
-
+sf_use_s2(FALSE)
 nb <- poly2nb(shp, row.names = shp$FIPS)
 
 island_idx <- which(card(nb) == 0)
