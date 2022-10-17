@@ -467,16 +467,17 @@ train_test <- function(survey_d, property_area_df, timestep_df, shp){
     ) %>%
     #select(c_cerealTV, c_fruitNutTV, c_ndviTV, c_precipTV, c_tminTV, c_tmaxTV) %>%
     # split into training, dev, & validation sets
-    mutate(group = sample(c('train', 'test'),
+    mutate(group = sample(c('train', 'test', 'dev'),
                           size = n(),
                           #size=nrow(st_d),
                           replace = TRUE,
-                          prob = c(.7, .3))) %>% # TODO: change these later
+                          prob = c(0.7, 0.3, 0.05))) %>% # TODO: change these later
     left_join(property_area_df) %>%
     filter(property_area_km2 > 1) %>%
     left_join(ecoregions) %>%
     left_join(timestep_df) %>%
     mutate(county_index = match(FIPS, as.character(shp@data$FIPS)))
+
   return(st_d)
 }
 
@@ -565,18 +566,21 @@ merge_obs_covs <- function(survey.d, obs_covs, shp){
 # start and end indices
 # survey_idx to match space-time units
 get_survey_outputs <- function(group, survey_d, st_d, property_area_df) {
-  tar_assert_true(group %in% c('train', 'test'))
+  tar_assert_true(group %in% c('train', 'test', 'dev'))
+
+  if(group == 'train') group <- c(group, "dev")
+
   group_d <- survey_d %>%
     filter(FIPS_timestep %in%
-             st_d$FIPS_timestep[st_d$group == group]) %>%
+             st_d$FIPS_timestep[st_d$group %in% group]) %>%
     left_join(property_area_df)
 
   tar_assert_true(all(group_d$property_area_km2 > 1))
   tar_assert_true(nrow(group_d) < nrow(survey_d))
 
   # Generate start and end indices for previous surveys ---------------------
-  group_d$start <- 0
-  group_d$end <- 0
+  group_d$start <- 1
+  group_d$end <- 1
 
   pb <- txtProgressBar(max = nrow(group_d), style = 3)
   for (i in 1:nrow(group_d)) {
@@ -619,6 +623,7 @@ make_nimble_lists <- function(st_d, X, short_basis, timestep_df, train_d, survey
 
     # spatiotemporal info
     area_km2 = st_d$property_area_km2,
+    log_area_km2 = log(st_d$property_area_km2),
     X = X,
     X_short = short_basis$short_basis,
 
@@ -626,9 +631,12 @@ make_nimble_lists <- function(st_d, X, short_basis, timestep_df, train_d, survey
     y = train_d$group_d$y,
     scaled_effort = train_d$group_d$scaled_effort,
     trap_count = train_d$group_d$trap_count,
+    n_trap_m1 = train_d$group_d$trap_count - 1,
     survey_area_km2 = train_d$group_d$property_area_km2,
+    log_survey_area_km2 = log(train_d$group_d$property_area_km2),
     effort = train_d$group_d$effort,
-    effort_per = train_d$group_d$effort_per
+    effort_per = train_d$group_d$effort_per,
+    log_effort_per= log(train_d$group_d$effort_per)
   )
 
   constants <- list(
@@ -641,6 +649,7 @@ make_nimble_lists <- function(st_d, X, short_basis, timestep_df, train_d, survey
     m_short = ncol(short_basis$short_basis),
     n_timestep = nrow(timestep_df),
     timestep = st_d$timestep,
+    log_pi = log(pi),
 
     # data for spatial indexing and ICAR priors
     n_county = nrow(shp),
@@ -660,12 +669,16 @@ make_nimble_lists <- function(st_d, X, short_basis, timestep_df, train_d, survey
     m_p = ncol(train_d$X_p),
     X_p = train_d$X_p,
     order = train_d$group_d$order,
+    not_first_survey = as.numeric(train_d$group_d$order != 1),
     p_county_idx = train_d$group_d$county_index,
     p_property_idx = as.numeric(train_d$group_d$property_factor),
     start = train_d$group_d$start,
     end = train_d$group_d$end,
     n_method = length(levels(survey_d$method_factor)),
-    method = as.numeric(train_d$group_d$method_factor)
+    method = as.numeric(train_d$group_d$method_factor),
+    trap_snare_ind = as.numeric(train_d$group_d$method_factor %in% c("trap", "snare")),
+    shooting_ind = as.numeric(!train_d$group_d$method_factor %in% c("trap", "snare")),
+    trap_snare_idx = pmax(as.numeric(train_d$group_d$method_factor) - 3, 1)
   )
 
 
