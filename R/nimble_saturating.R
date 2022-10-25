@@ -21,12 +21,12 @@ modelCode <- nimbleCode({
 
   # non time varying coefficients - process model
   for(i in 1:m_n){
-    beta[i] ~ dnorm(0, tau = 1)
+    beta[i] ~ dnorm(0, sd = 1)
   }
 
   # non time varying coefficients - observation model
   for(i in 1:m_p){
-    beta_p[i] ~ dnorm(0, tau = 1)
+    beta_p[i] ~ dnorm(0, sd = 1)
   }
 
   for(i in 1:n_method){
@@ -34,61 +34,55 @@ modelCode <- nimbleCode({
   }
 
   for(i in 1:n_property){
-    eps_propertyR[i] ~ dnorm(0, tau = 1)
-    eps_property_pR[i] ~ dnorm(0, tau = 1)
+    eps_property_pR[i] ~ dnorm(0, sd = 1)
+    eps_propertyR[i] ~ dnorm(0, sd = 1)
   }
 
-  tau_dcar ~ dgamma(0.001, 0.001)
-  sigma_property ~ dnorm(0, tau = 1)
-  sigma_property_p ~ dnorm(0, tau = 1)
-  sigma_st0 ~ dnorm(0, tau = 1) # scale parameter at time 1 for spatially uncorrelated temporal autocorrelation
-  sigma_st ~ dnorm(0, tau = 1) # scale parameter at time > 1 for spatially uncorrelated temporal autocorrelation
+  eps_property[1:n_property] <- eps_propertyR[1:n_property] * sigma_property
+
+  # sigma_car ~ dunif(0, 100)   # prior for variance components based on Gelman (2006)
+  # tau_car <- 1 / sigma_car^2
+  sigma_short ~ dnorm(0, sd = 1)
+  sigma_property ~ dexp(1)
+  sigma_property_p ~ dexp(1)
+  # sigma_st0 ~ dexp(1) # scale parameter at time 1 for spatially uncorrelated temporal autocorrelation
+  # sigma_st ~ dexp(1) # scale parameter at time > 1 for spatially uncorrelated temporal autocorrelation
   eta ~ dbeta(9, 1) # temporal autocorrelation parameter (AR1)
 
-  for (i in 1:n_timestep) {
-    for(j in 1:n_county){
-      eps_stR[i, j] ~ dnorm(0, tau = 1)
-    }
-  }
-
-  sigma_short ~ dnorm(0, tau = 1)
 
 
   for(i in 1:3){
     gamma[i] ~ dgamma(1, 1)
   }
-  gamma[4] ~ dgamma(7.704547, 4.41925)       # snare
-  gamma[5] ~ dgamma(3.613148, 3.507449)      # trap
+  gamma[4] ~ dgamma(gamma_prior[1, 1], gamma_prior[1, 2])         # snare
+  gamma[5] ~ dgamma(gamma_prior[2, 1], gamma_prior[2, 2])         # trap
 
-  log_rho[1] ~ dnorm(-1.654013, 0.8092821)   # firearms
-  log_rho[2] ~ dnorm(2.74274, 0.5976205)     # fixed wing
-  log_rho[3] ~ dnorm(2.74274, 0.5976205)     # helicopter
-  log_rho[4] ~ dnorm(0.2777449, 0.2255966)   # snare
-  log_rho[5] ~ dnorm(0.6438721, 0.2225168)   # trap
-
-  eps_property[1:n_property] <- eps_propertyR[1:n_property] * sigma_property
+  for(i in 1:n_method){
+    log_rho[i] ~ dnorm(log_rho_prior[i, 1], log_rho_prior[i, 2])
+  }
 
   for(i in 1:n_survey){
 
-    log_potential_area[i] <- log(1 + p_unique[method[i]] * n_trap_m1[i]) +
-      log_effort_per[i] +
-      log_rho[method[i]] * shooting_ind[i] + # shooting and aerial only
-      (log_pi + 2 * log_rho[method[i]] - log(gamma[method[i]] + exp(log_effort_per[i]))) * trap_snare_ind[i] # traps and snares only
+    log(potential_area[i]) <- log(1 + p_unique[method[i]] * n_trap_m1[i]) + # all methods
+      ((log_pi + 2 * (log_rho[method[i]] + log_effort_per[i] - log(gamma[method[i]] + effort_per[i]))) * trap_snare_ind[i]) + # traps and snares only
+      ((log_rho[method[i]] + log_effort_per[i]) * shooting_ind[i]) # shooting and aerial only
 
-    area_diff[i] <- log_potential_area[i] - log_survey_area_km2[i]
-    log_pr_area_sampled[i] <- min(0, area_diff[i])
+    # area_constraint[i] ~ dconstraint(potential_area[i] <= survey_area_km2[i])
+    pr_area_sampled[i] <- min(survey_area_km2[i], potential_area[i])
 
-    logit(theta[i]) <- X_p[i, 1:m_p] %*% beta_p[1:m_p] +
-      eps_property_pR[p_property_idx[i]] * sigma_property_p
+    # probability of capture, given that an individual is in the surveyed area
+    logit(theta_star[i]) <- (X_p[i, 1:m_p] %*% beta_p[1:m_p] + # beta_p[1:5] are random intercepts by method
+      eps_property_pR[p_property_idx[i]] * sigma_property_p)[1,1]
+      # eps_property_pR[p_property_idx[i]]
 
-    log_theta[i] <- log(theta[i])
+    theta[i] <- (pr_area_sampled[i] / survey_area_km2[i]) * theta_star[i]
 
-    log_p[i] <- log_theta[i] + log_pr_area_sampled[i] +
-      sum(log(1 - exp(log_theta[start[i]:end[i]])))*not_first_survey[i] # if > 1st survey
+    # the probability an individual is captured
+    log(p[i]) <- log(theta[i]) +
+      sum(log(1 - theta[start[i]:end[i]])) * not_first_survey[i] # if > 1st survey
 
     # likelihood
-    lambda[i] <- exp(log_lambda[survey_idx[i]] + log_p[i])
-    y[i] ~ dpois(lambda[i])
+    y[i] ~ dpois(lambda[survey_idx[i]] * p[i])
   }
 
 
@@ -98,7 +92,8 @@ modelCode <- nimbleCode({
       adj = adj[1:n_edges],
       weights = weights[1:n_edges],
       num = num[1:n_county],
-      tau = tau_dcar,
+      # tau = tau_car,
+      tau = 1,
       zero_mean = 1
     )
   }
@@ -108,23 +103,32 @@ modelCode <- nimbleCode({
   for(i in 2:m_short){
     z_short[i, 1:n_county] <- z_shortR[i - 1, 1:n_county] +
       z_shortR[i, 1:n_county] * sigma_short
+      # z_shortR[i, 1:n_county]
   }
 
+  # for(t in 1:n_timestep){
+  #   for(i in 1:n_county){
+  #     eps_stR[t, i] ~ dnorm(0, sd = 1)
+  #   }
+  # }
+
   # create the spatio-temporal adjustment
-  eps_st[1, 1:n_county] <- eps_stR[1, 1:n_county] * sigma_st0
-  for(t in 2:n_timestep){
-    # at subsequent time steps, there is autocorrelation (eta) between time steps
-    eps_st[t, 1:n_county] <- eta * eps_st[t - 1, 1:n_county] +
-      eps_stR[t, 1:n_county] * sigma_st
-  }
+  # eps_st[1, 1:n_county] <- eps_stR[1, 1:n_county] * sigma_st0
+  # for(t in 2:n_timestep){
+  #   # at subsequent time steps, there is autocorrelation (eta) between time steps
+  #   eps_st[t, 1:n_county] <- eta * eps_st[t - 1, 1:n_county] +
+  #     eps_stR[t, 1:n_county] * sigma_st
+  # }
+
+
 
   # expected pig abundance
   for (i in 1:n_st) {
-    log_lambda[i] <- X[i, 1:m_n] %*% beta[1:m_n] + # non time varying covariates
+    log(lambda[i]) <- (X[i, 1:m_n] %*% beta[1:m_n] + # non time varying covariates
       X_short[i, 1:m_short] %*% z_short[1:m_short, county_idx[i]] + # B-spline vectors * basis vector coefficients
       eps_property[property[i]] + # property adjustment
-      eps_st[timestep[i], county_idx[i]] + # spatio-temporal adjustment
-      log_area_km2[i] # area offset
+      # eps_st[timestep[i], county_idx[i]] + # spatio-temporal adjustment
+      log_area_km2[i])[1,1] # area offset
   }
 
 })
