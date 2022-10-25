@@ -5,7 +5,11 @@
 
 get_timestep_df <- function(file) readRDS(file)
 
-get_shp <- function() readOGR(file.path("data", "counties"), "dtl.cnty.lower48.meters")
+get_shp <- function(){
+  shp <- readOGR(file.path("data", "counties"), "dtl.cnty.lower48.meters")
+  # shp <- shp[shp@data$STATE_NAME == "Missouri",]
+  return(shp)
+}
 
 get_traps <- function(file){
   read_csv(file) %>%
@@ -446,7 +450,7 @@ start_end <- function(merged_d){
 
 # Create a smaller data frame with spatiotemporal covs to avoid  ----------
 # redundant computations
-train_test <- function(survey_d, property_area_df, timestep_df, shp){
+train_test <- function(survey_d, property_area_df, timestep_df, shp, state_filter){
 
   ecoregions <- readOGR(file.path('data', 'ecoregions'),
                         'Cnty.lower48.EcoRegions.Level2') %>%
@@ -456,6 +460,8 @@ train_test <- function(survey_d, property_area_df, timestep_df, shp){
   set.seed(123)
 
   st_d <- survey_d %>%
+    filter(state %in% state_filter,
+           countyname != "ST CLAIR") %>% # TODO remove when not subsetting to MO
     distinct(FIPS_timestep, FIPS, timestep, LND010190D, agrp_prp_id,
              property_factor,
              c_hydroden, c_carnrich, c_crop, c_pasture, c_tree,
@@ -485,6 +491,10 @@ train_test <- function(survey_d, property_area_df, timestep_df, shp){
 # Generate spatial neighbors ----------------------------------------------
 spatial_neighbors <- function(st_d, timestep_df, shp){
 
+  shp <- shp[shp@data$STATE_NAME == "Missouri",]
+  shp <- shp[toupper(shp@data$NAME) %in% unique(st_d$countyname),]
+
+
   sf_use_s2(FALSE)
   nb <- poly2nb(shp, row.names = shp$FIPS)
 
@@ -494,7 +504,7 @@ spatial_neighbors <- function(st_d, timestep_df, shp){
   # B is suitable for building N, N_edges, node1, and node2
   # following http://mc-stan.org/users/documentation/case-studies/icar_stan.html
 
-  # for use in dcar_normal implimented in nimble
+  # for use in dcar_normal implemented in nimble
   D <- nb2WB(nb)
 
   # B-splines for abundance over time
@@ -645,15 +655,15 @@ make_nimble_lists <- function(st_d, X, short_basis, timestep_df, train_d, survey
     n_st = nrow(st_d),
     m_n = ncol(X),
     n_property = length(unique(st_d$agrp_prp_id)),
-    property = as.numeric(st_d$property_factor),
+    property = st_d$agrp_prp_id |> as.factor() |> as.numeric(),
     m_short = ncol(short_basis$short_basis),
     n_timestep = nrow(timestep_df),
     timestep = st_d$timestep,
     log_pi = log(pi),
 
     # data for spatial indexing and ICAR priors
-    n_county = nrow(shp),
-    county_idx = st_d$county_index,
+    n_county = st_d$countyname |> unique() |> length(),
+    county_idx = st_d$countyname |> as.factor() |> as.numeric(),
     n_edges = length(short_basis$B@i),
     node1 = short_basis$B@i + 1, # add one to offset zero-based index
     node2 = short_basis$B@j + 1,
@@ -670,8 +680,8 @@ make_nimble_lists <- function(st_d, X, short_basis, timestep_df, train_d, survey
     X_p = train_d$X_p,
     order = train_d$group_d$order,
     not_first_survey = as.numeric(train_d$group_d$order != 1),
-    p_county_idx = train_d$group_d$county_index,
-    p_property_idx = as.numeric(train_d$group_d$property_factor),
+    p_county_idx = train_d$group_d$countyname |> as.factor() |> as.numeric(),
+    p_property_idx = train_d$group_d$agrp_prp_id |> as.factor() |> as.numeric(),
     start = train_d$group_d$start,
     end = train_d$group_d$end,
     n_method = length(levels(survey_d$method_factor)),
