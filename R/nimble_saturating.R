@@ -40,11 +40,11 @@ modelCode <- nimbleCode({
 
   eps_property[1:n_property] <- eps_propertyR[1:n_property] * sigma_property
 
-  # sigma_car ~ dunif(0, 100)   # prior for variance components based on Gelman (2006)
-  # tau_car <- 1 / sigma_car^2
-  sigma_short ~ dnorm(0, sd = 1)
-  sigma_property ~ dexp(1)
-  sigma_property_p ~ dexp(1)
+  sigma_car ~ dunif(0, 100)   # prior for variance components based on Gelman (2006)
+  tau_car <- 1 / sigma_car^2
+  sigma_short ~ dexp(0.01)
+  sigma_property ~ dexp(0.01)
+  sigma_property_p ~ dexp(0.01)
   # sigma_st0 ~ dexp(1) # scale parameter at time 1 for spatially uncorrelated temporal autocorrelation
   # sigma_st ~ dexp(1) # scale parameter at time > 1 for spatially uncorrelated temporal autocorrelation
   eta ~ dbeta(9, 1) # temporal autocorrelation parameter (AR1)
@@ -58,14 +58,15 @@ modelCode <- nimbleCode({
   gamma[5] ~ dgamma(gamma_prior[2, 1], gamma_prior[2, 2])         # trap
 
   for(i in 1:n_method){
-    log_rho[i] ~ dnorm(log_rho_prior[i, 1], log_rho_prior[i, 2])
+    rho[i] ~ dgamma(0.1, 0.1)
+    # rho[i] ~ dlnorm(log_rho_prior[i, 1], log_rho_prior[i, 2])
   }
 
   for(i in 1:n_survey){
 
     log(potential_area[i]) <- log(1 + p_unique[method[i]] * n_trap_m1[i]) + # all methods
-      ((log_pi + 2 * (log_rho[method[i]] + log_effort_per[i] - log(gamma[method[i]] + effort_per[i]))) * trap_snare_ind[i]) + # traps and snares only
-      ((log_rho[method[i]] + log_effort_per[i]) * shooting_ind[i]) # shooting and aerial only
+      ((log_pi + 2 * (log(rho[method[i]]) + log_effort_per[i] - log(gamma[method[i]] + effort_per[i]))) * trap_snare_ind[i]) + # traps and snares only
+      ((log(rho[method[i]]) + log_effort_per[i]) * shooting_ind[i]) # shooting and aerial only
 
     # area_constraint[i] ~ dconstraint(potential_area[i] <= survey_area_km2[i])
     pr_area_sampled[i] <- min(survey_area_km2[i], potential_area[i])
@@ -92,8 +93,8 @@ modelCode <- nimbleCode({
       adj = adj[1:n_edges],
       weights = weights[1:n_edges],
       num = num[1:n_county],
-      # tau = tau_car,
-      tau = 1,
+      tau = tau_car,
+      # tau = 1,
       zero_mean = 1
     )
   }
