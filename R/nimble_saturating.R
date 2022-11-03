@@ -42,7 +42,7 @@ modelCode <- nimbleCode({
 
   sigma_car ~ dunif(0, 100)   # prior for variance components based on Gelman (2006)
   tau_car <- 1 / sigma_car^2
-  sigma_short ~ dexp(0.01)
+  # sigma_short ~ dexp(0.01)
   sigma_property ~ dexp(0.01)
   sigma_property_p ~ dexp(0.01)
   # sigma_st0 ~ dexp(1) # scale parameter at time 1 for spatially uncorrelated temporal autocorrelation
@@ -103,8 +103,8 @@ modelCode <- nimbleCode({
   z_short[1, 1:n_county] <- z_shortR[1, 1:n_county]
   for(i in 2:m_short){
     z_short[i, 1:n_county] <- z_shortR[i - 1, 1:n_county] +
-      z_shortR[i, 1:n_county] * sigma_short
-      # z_shortR[i, 1:n_county]
+      # z_shortR[i, 1:n_county] * sigma_short
+      z_shortR[i, 1:n_county]
   }
 
   # for(t in 1:n_timestep){
