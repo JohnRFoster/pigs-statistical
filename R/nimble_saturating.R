@@ -40,8 +40,9 @@ modelCode <- nimbleCode({
 
   eps_property[1:n_property] <- eps_propertyR[1:n_property] * sigma_property
 
-  sigma_car ~ dunif(0, 100)   # prior for variance components based on Gelman (2006)
-  tau_car <- 1 / sigma_car^2
+  # sigma_car ~ dunif(0, 100)   # prior for variance components based on Gelman (2006)
+  # tau_car <- 1 / sigma_car^2
+  tau_car ~ dexp(0.01)
   # sigma_short ~ dexp(0.01)
   sigma_property ~ dexp(0.01)
   sigma_property_p ~ dexp(0.01)
