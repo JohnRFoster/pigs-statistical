@@ -32,13 +32,13 @@ log_rho_priors_unInf <- data.frame(
 )
 
 gamma_priors_inf <- data.frame(
-  alpha = c(7.704547, 3.613148),
-  beta = c(4.41925, 3.507449)
+  shape = c(7.704547, 3.613148),
+  rate = c(4.41925, 3.507449)
 )
 
 gamma_priors_unInf <- data.frame(
-  alpha = rep(0.1, 2),
-  beta = rep(0.1, 2)
+  shape = rep(0.1, 2),
+  rate = rep(0.1, 2)
 )
 
 data$log_rho_prior <- log_rho_priors_unInf
@@ -50,19 +50,18 @@ inits <- function(){
   ls <- list(
     lambda = rpois(length(data$y), data$y) + 1,
     gamma = rgamma(5, 1, 1),
-    log_rho = rlnorm(5, 1, 1),
+    rho = rgamma(5, 1, 1),
     beta = rnorm(constants$m_n, 0, 1),
     beta_p = rnorm(constants$m_p, 0, 1),
     p_unique = rbeta(constants$n_method, 1, 1),
     eps_propertyR = rnorm(constants$n_property, 0, 1),
     eps_property_pR = rnorm(constants$n_property, 0, 1),
-    sigma_car = runif(1, 10, 90),
+    tau_car = runif(1, 10, 90),
     sigma_property = rexp_nimble(1, 1),
     sigma_property_p = rexp_nimble(1, 1),
     sigma_st0 = rexp_nimble(1, 1),
     sigma_st = rexp_nimble(1, 1),
     sigma_short = rexp_nimble(1, 1),
-    # sigma_short = rexp_nimble(1, 0, 1),
     eta = rbeta(1, 9, 1),
     eps_stR = matrix(rnorm(constants$n_timestep*constants$n_county, 0, 1), constants$n_timestep, constants$n_county),
     z_shortR = matrix(0, constants$m_short, constants$n_county)
@@ -75,8 +74,9 @@ inits <- function(){
 params_check <- c(
   "beta",
   "gamma",
-  "log_rho",
+  "rho",
   "p_unique",
+ # "tau",
   "sigma"
 )
 
@@ -89,17 +89,38 @@ system.time(
     model_data = data,
     model_constants = constants,
     model_inits = inits,
-    n_iter = 1000,
+    n_iter = 5000,
+    n_burnin = 0,
     params_check = params_check,
-    max_iter = 5000
+    max_iter = 200000,
+    dest = "out/MO/dcar_precision",
+    resetMV = TRUE,
+    save_iter = TRUE
   )
 )
 stopCluster(cl)
 message("Stop cluster")
 
+# model_code = modelCode
+# model_data = data
+# model_constants = constants
+# model_inits = inits
+# init = model_inits()
+# n_iter = 1000
+# n_burnin = 0
+# params_check = params_check
+# max_iter = 5000
+# resetMV = TRUE
+# save_iter = TRUE
+# effective_size = 5000
+# max_psrf = 500
+# calculate = TRUE
+# use_conjugacy = FALSE
 
 
+str(samples)
 
-
+mcmc <- samples$samples
+plot(mcmc[,"sigma_property"])
 
 
