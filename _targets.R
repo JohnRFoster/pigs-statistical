@@ -13,9 +13,12 @@ tar_option_set(
   # packages that your targets need to run
   packages = c("tidyverse",
                "lubridate",
+               "config",
                "spdep",
                "readxl",
                "spatialreg",
+               "parallel",
+               "nimble",
                "rgdal"),
 
   # default storage format
@@ -27,16 +30,34 @@ tar_option_set(
 # tar_make_clustermq() configuration (okay to leave alone):
 options(clustermq.scheduler = "multiprocess")
 
+# what configuration setting are we using?
+Sys.setenv(R_CONFIG_ACTIVE = "default")
+
+
 # tar_make_future() configuration (okay to leave alone):
 # Install packages {{future}}, {{future.callr}}, and {{future.batchtools}} to allow use_targets() to configure tar_make_future() options.
 
 # Run the R scripts in the R/ folder with your custom functions:
 # tar_source() # will run all scripts in a specified directory
-source("R/01_setup.R")
 source("R/functions_data.R") # Source other scripts as needed. # nolint
+source("R/01_setup.R")
 
 # Replace the target list below with your own:
 list(
+
+  tar_target(
+    name = file.config,
+    command = "config.yml",
+    format = "file"),
+  tar_target(
+    name = configs,
+    command = get_configs(file.config)
+  ),
+
+  tar_target(
+    name = states,
+    command = get_states(configs$states_filter)
+  ),
 
   tar_target(
     name = file.timestep,
@@ -169,12 +190,12 @@ list(
 
   tar_target(
     name = st_d,
-    command = train_test(survey_d, property_area_df, timestep_df, shp)
+    command = train_test(survey_d, property_area_df, timestep_df, shp, states$Postal)
   ),
 
   tar_target(
     name = short_basis,
-    command = spatial_neighbors(st_d, timestep_df, shp)
+    command = spatial_neighbors(st_d, timestep_df, shp, states$State)
   ),
 
   tar_target(
@@ -188,13 +209,32 @@ list(
   ),
 
   tar_target(
-    name = group_d,
-    command = get_survey_outputs(run_group, survey_obs, st_d, property_area_df)
+    name = group_d_dev,
+    command = get_survey_outputs("dev", survey_obs, st_d, property_area_df)
+  ),
+  tar_target(
+    name = nimble_lists_dev,
+    command = make_nimble_lists(st_d, X, short_basis, timestep_df, group_d_dev,
+                                survey_d, shp)
   ),
 
   tar_target(
-    name = nimble_lists,
-    command = make_nimble_lists(st_d, X, short_basis, timestep_df, group_d,
+    name = group_d_train,
+    command = get_survey_outputs("train", survey_obs, st_d, property_area_df)
+  ),
+  tar_target(
+    name = nimble_lists_train,
+    command = make_nimble_lists(st_d, X, short_basis, timestep_df, group_d_train,
+                                survey_d, shp)
+  ),
+
+  tar_target(
+    name = group_d_test,
+    command = get_survey_outputs("test", survey_obs, st_d, property_area_df)
+  ),
+  tar_target(
+    name = nimble_lists_test,
+    command = make_nimble_lists(st_d, X, short_basis, timestep_df, group_d_test,
                                 survey_d, shp)
   )
 )
