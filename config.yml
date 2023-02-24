@@ -1,0 +1,18 @@
+default:
+  run_parallel: TRUE
+  n_iter: 5000
+  init_dir: NULL
+  params_check : !expr c("beta_p", "log_rho", "log_gamma", "p_unique", "log_r_mu", "tau_proc")
+  spatial: FALSE
+  property_obs_effect: FALSE
+  out_dir: "out/test"
+  model_file: "R/nimble_dynamic.R"
+
+exponential:
+  model_dir: "exponential"
+  process_type: "exponential"
+
+ricker:
+  model_dir: "ricker"
+  process_type: "ricker"
+
