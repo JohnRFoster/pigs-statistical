@@ -2,7 +2,7 @@
 # module load swset/2018.05  gcc/7.3.0 r/3.5.2-py27 r-rgdal/1.2-16-py27 r-sf/0.5-5-py27 r-rcpp/1.0.0-py27
 
 
-library(plyr)
+# library(plyr)
 library(rgdal)
 library(maptools)
 #if (!require(gpclib)) install.packages("gpclib", type="source")
@@ -113,7 +113,7 @@ insitu <- full_join(traps, firearms) %>%
   full_join(snares) %>%
   full_join(aerial) %>%
   distinct %>%
-  mutate(insitu_id = 1:n(),
+  mutate(insitu_id = 1:nrow(.),
          method = tolower(method)) %>%
   filter(!is.na(y))
 write_rds(insitu, paste0(outDir, 'insitu.rds'))
@@ -123,7 +123,9 @@ write_rds(insitu, paste0(outDir, 'insitu.rds'))
 # resolve duplicate property values - when there are multiple values, take max
 
 # why are we taking the max property value when there are duplicate records?
-property_area_df <- distinct(insitu, agrp_prp_id, total.land) %>%
+property_area_df <- insitu |>
+  select(agrp_prp_id, total.land) |>
+  distinct() %>%
   group_by(agrp_prp_id) %>%
   summarize(n_areas = length(unique(total.land)),
             property_area_acres = max(total.land, na.rm = TRUE),
@@ -206,7 +208,7 @@ order_df <- clean_d %>%
                            as.numeric(start.date),
                            as.numeric(start.date) +
                              (as.numeric(end.date) - as.numeric(start.date)) / 2)
-         ) %>%
+  ) %>%
   ungroup
 
 # impose stochastic ordering of events by adding jitter
@@ -266,7 +268,7 @@ d <- clean_d %>%
   group_by(method) %>%
   mutate(scaled_effort = c(scale(log(1 + effort))),
          FIPS = paste0(sprintf('%02d', st_gsa_state_cd),
-                           sprintf('%03d', cnty_gsa_cnty_cd)),
+                       sprintf('%03d', cnty_gsa_cnty_cd)),
          Year = as.numeric(substr(start.date, 1, 4))) %>%
   ungroup
 
@@ -314,8 +316,8 @@ timeVar1 <- rep_df
 
 timeVar2 <- 'data/covariates/TimeVaryingCompletedPredictors/FINAL.Process.Model.Predictors.timevarying.tmin.tmax.ppt.14Apr2021.csv' %>%
   read_csv #%>%
-  #dplyr::select(state_name, fips, year, month, ndvi, precip, tmin, tmax)
-  #dplyr::select(state_name, fips, year, month, precip, tmin, tmax)
+#dplyr::select(state_name, fips, year, month, ndvi, precip, tmin, tmax)
+#dplyr::select(state_name, fips, year, month, precip, tmin, tmax)
 timeVar2$FIPS <- as.character(timeVar2$fips)
 timeVar2$month <- as.integer(timeVar2$month)
 #---figure out where NAs are coming from -- NAs are because some counties don't have
@@ -457,9 +459,9 @@ survey_d <- merged_d %>%
   # mutate(idx = 1:n()) %>%
   mutate(idx=1:nrow(merged_d)) %>%
   dplyr::select(idx, state, countyname, FIPS, start.date, end.date, timestep, order,
-         agrp_prp_id, trap_count, method, effort, y, scaled_effort, property_area_acres,
-         order, Year,
-         starts_with('c_'), LND010190D) %>%
+                agrp_prp_id, trap_count, method, effort, y, scaled_effort, property_area_acres,
+                order, Year,
+                starts_with('c_'), LND010190D) %>%
   arrange(FIPS, agrp_prp_id, timestep, order) %>%
   mutate(method_factor = factor(method))
 mean(is.na(survey_d$c_tree))
@@ -479,7 +481,7 @@ st_d <- survey_d %>%
            c_lewis, c_hetero,
            #c_cerealTV, c_fruitNutTV, c_ndviTV, c_precipTV, c_tminTV, c_tmaxTV,
            .keep_all=TRUE
-           ) %>%
+  ) %>%
   #select(c_cerealTV, c_fruitNutTV, c_ndviTV, c_precipTV, c_tminTV, c_tmaxTV) %>%
   # split into training, dev, & validation sets
   mutate(group = sample(c('train', 'test'),
@@ -511,7 +513,221 @@ B <- as(listw, 'symmetricMatrix')
 n_year <- length(unique(substr(timestep_df$start_dates,
                                1, 4)))
 short_basis <- splines::bs(st_d$timestep,
-                  df = n_year * 2, intercept = TRUE)
+                           df = n_year * 2, intercept = TRUE)
+write_rds(short_basis, paste0(outDir, 'short_basis.rds'))
+
+# Generating a design matrix
+current.na.action <- options('na.action')
+options(na.action='na.pass')
+X <- model.matrix(~ 0 +
+                    c_hydroden +
+                    c_lewis +
+                    c_hetero +
+                    c_carnrich +
+                    c_crop +
+                    c_pasture +
+                    #c_evergreen + # exclude evergreen, deciduous, cereal crop, pasture, tmax, tmin, precip to reduce parameters
+                    #c_deciduous +
+                    #c_cerealCrop +
+                    #c_fruitNut+ # exclude fruitNut, rootTuber, vegetablesMelons, CerealTV, fruitNutTV because too many NAs
+                    #c_rootTuber +
+                    #c_vegetablesMelons +
+                    #c_cerealTV +
+                    #c_fruitNutTV +
+                    #c_ndviTV +
+                    # c_precipTV+
+                    # c_tminTV +
+                  # c_tmaxTV +
+                  c_tree
+                  ,
+                  data = st_d, na.action="na.pass")
+
+# find the number of NAs in each column
+apply(X, 2, function(x){mean(is.na(x))})
+
+# create a matrix that tells stan to ignore NAs
+#X_use <- ifelse(is.na(X), 0, 1)
+# then remove NAs from X
+#X[is.na(X)] <- 0
+# restore NA action
+#options(na.action=current.na.action) # if this doesn't work (will throw error in get_survey_outputs) set: options(na.action="na.omit")
+
+# Add observation covariates to the survey data
+survey_d <- survey_d %>%
+  left_join(obs_covs) %>%
+  mutate(rural.road.density = mean_impute(rural.road.density),
+         prop.pub.land = mean_impute(prop.pub.land),
+         mean.ruggedness = mean_impute(mean.ruggedness),
+         mean.canopy.density = mean_impute(mean.canopy.density),
+         c_road_den = center_scale(rural.road.density),
+         c_rugged = center_scale(mean.ruggedness),
+         c_canopy = center_scale(mean.canopy.density),
+         county_index = match(FIPS, as.character(shp@data$FIPS)))
+
+assert_that(!any(is.na(survey_d$c_road_den)))
+assert_that(!any(is.na(survey_d$county_index)))
+
+
+#*** SAVE HERE FOR DIAGNOSIS
+#save.image(file="./test/save_20190528.RData")
+
+# need a function to create the following outputs from model:
+# X_p
+# start and end indices
+# survey_idx to match space-time units
+get_survey_outputs <- function(survey_d, group) {
+  assert_that(group %in% c('train', 'test'))
+  group_d <- survey_d %>%
+    filter(FIPS_timestep %in%
+             st_d$FIPS_timestep[st_d$group == group]) %>%
+    left_join(property_area_df)
+
+  assert_that(all(group_d$property_area_km2 > 1))
+  assert_that(nrow(group_d) < nrow(survey_d))
+
+  # Generate start and end indices for previous surveys ---------------------
+  group_d$start <- 0
+  group_d$end <- 0
+
+  pb <- txtProgressBar(max = nrow(group_d), style = 3)
+  for (i in 1:nrow(group_d)) {
+    if (group_d$order[i] > 1) {
+      idx <- which(group_d$FIPS == group_d$FIPS[i] &
+                     group_d$agrp_prp_id == group_d$agrp_prp_id[i] &
+                     group_d$timestep == group_d$timestep[i] &
+                     group_d$order < group_d$order[i])
+      group_d$start[i] <- idx[1]
+      group_d$end[i] <- idx[length(idx)]
+      assert_that(identical(idx, group_d$start[i]:group_d$end[i]))
+    }
+    setTxtProgressBar(pb, i)
+  }
+  close(pb)
+
+  # indices to match surveys to rows in the spatiotemporal data
+  group_d <- group_d %>%
+    mutate(survey_idx = match(FIPS_timestep, st_d$FIPS_timestep),
+           effort_per = effort / trap_count)
+  assert_that(!any(is.na(group_d$survey_idx)))
+  assert_that(!any(st_d$property_area_acres <= 0))
+  assert_that(!any(survey_d$effort == 0))
+
+  # make a design matrix for detection probs
+  X_p <- model.matrix(~ 0 +
+                        method * c_road_den +
+                        method * c_rugged +
+                        method * c_canopy,
+                      data = group_d)
+  assert_that(identical(nrow(X_p), nrow(group_d)))
+
+  return(list(X_p = X_p,
+              group_d = group_d))
+}
+
+train_d <- get_survey_outputs(survey_d, 'train')
+dev_d <- get_survey_outputs(survey_d, 'test')
+
+stan_d <- list(
+  # spatiotemporal info
+  n_st = nrow(st_d),
+  m_n = ncol(X),
+  area_km2 = st_d$property_area_km2,
+  n_property = length(unique(st_d$agrp_prp_id)),
+  property = as.numeric(st_d$property_factor),
+  X = X,
+  # X_use = X_use,
+  m_short = ncol(short_basis),
+  X_short = short_basis,
+  n_timestep = nrow(timestep_df),
+  timestep = st_d$timestep,
+
+  # data for spatial indexing and ICAR priors
+  n_county = nrow(shp),
+  county_idx = st_d$county_index,
+  n_edges = length(B@i),
+  node1 = B@i + 1, # add one to offset zero-based index
+  node2 = B@j + 1,
+  n_island = n_island,
+  island_idx = island_idx,
+
+  # training data
+  n_survey = nrow(train_d$group_d),
+  survey_idx = train_d$group_d$survey_idx,
+  y = train_d$group_d$y,
+  scaled_effort = train_d$group_d$scaled_effort,
+  trap_count = train_d$group_d$trap_count,
+  m_p = ncol(train_d$X_p),
+  X_p = train_d$X_p,
+  order = train_d$group_d$order,
+  survey_area_km2 = train_d$group_d$property_area_km2,
+  p_county_idx = train_d$group_d$county_index,
+  p_property_idx = as.numeric(train_d$group_d$property_factor),
+  start = train_d$group_d$start,
+  end = train_d$group_d$end,
+  n_method = length(levels(survey_d$method_factor)),
+  method = as.numeric(train_d$group_d$method_factor),
+  effort = train_d$group_d$effort,
+  effort_per = train_d$group_d$effort_per,
+
+  # dev data
+  n_survey_dev = nrow(dev_d$group_d),
+  survey_idx_dev = dev_d$group_d$survey_idx,
+  y_dev = dev_d$group_d$y,
+  scaled_effort_dev = dev_d$group_d$scaled_effort,
+  trap_count_dev = dev_d$group_d$trap_count,
+  X_p_dev = dev_d$X_p,
+  order_dev = dev_d$group_d$order,
+  survey_area_km2_dev = dev_d$group_d$property_area_km2,
+  p_county_idx_dev = dev_d$group_d$county_index,
+  p_property_idx_dev = as.numeric(dev_d$group_d$property_factor),
+  start_dev = dev_d$group_d$start,
+  end_dev = dev_d$group_d$end,
+  method_dev = as.numeric(dev_d$group_d$method_factor),
+  effort_dev = dev_d$group_d$effort,
+  effort_per_dev = dev_d$group_d$effort_per
+)
+
+# make sure the data contain no missing values
+number_missing_values <- lapply(stan_d, FUN = function(x) mean(is.na(x))) %>%
+  unlist %>%
+  sum
+no_missing_values <- number_missing_values == 0
+assert_that(no_missing_values)
+
+# make sure that all five methods made it in here
+assert_that(all(levels(train_d$group_d$method_factor) %in%
+                  c("firearms", "fixed wing", "helicopter", "snare", "trap")))
+
+write_rds(merged_d, paste0(outDir, 'merged_d.rds'))
+write_rds(st_d, paste0(outDir, 'st_d.rds'))
+write_rds(survey_d, paste0(outDir, 'survey_d.rds'))
+write_rds(train_d, paste0(outDir, 'train_d.rds'))
+write_rds(dev_d, paste0(outDir, 'dev_d.rds'))
+write_rds(stan_d, paste0(outDir, 'stan_d.rds'))
+write_rds(process_covs, paste0(outDir, 'process_covs.rds'))
+write_rds(timestep_df, paste0(outDir, 'timestep_df.rds'))
+
+apply(X, 2, function(x) quantile(x, c(0.025,0.5,0.975)))
+# Generate spatial neighbors ----------------------------------------------
+st_d <- st_d %>%
+  mutate(county_index = match(FIPS, as.character(shp@data$FIPS)))
+sf_use_s2(FALSE)
+nb <- poly2nb(shp, row.names = shp$FIPS)
+
+island_idx <- which(card(nb) == 0)
+n_island <- length(island_idx)
+
+# generate neighborhood data for spatial prior
+listw <- nb2listw(nb, style = 'B', zero.policy = TRUE)
+B <- as(listw, 'symmetricMatrix')
+# B is suitable for building N, N_edges, node1, and node2
+# following http://mc-stan.org/users/documentation/case-studies/icar_stan.html
+
+# B-splines for abundance over time
+n_year <- length(unique(substr(timestep_df$start_dates,
+                               1, 4)))
+short_basis <- splines::bs(st_d$timestep,
+                           df = n_year * 2, intercept = TRUE)
 write_rds(short_basis, paste0(outDir, 'short_basis.rds'))
 
 # Generating a design matrix
@@ -625,6 +841,7 @@ get_survey_outputs <- function(survey_d, group) {
 train_d <- get_survey_outputs(survey_d, 'train')
 dev_d <- get_survey_outputs(survey_d, 'test')
 
+
 stan_d <- list(
   # spatiotemporal info
   n_st = nrow(st_d),
@@ -633,7 +850,7 @@ stan_d <- list(
   n_property = length(unique(st_d$agrp_prp_id)),
   property = as.numeric(st_d$property_factor),
   X = X,
- # X_use = X_use,
+  # X_use = X_use,
   m_short = ncol(short_basis),
   X_short = short_basis,
   n_timestep = nrow(timestep_df),
@@ -683,7 +900,7 @@ stan_d <- list(
   method_dev = as.numeric(dev_d$group_d$method_factor),
   effort_dev = dev_d$group_d$effort,
   effort_per_dev = dev_d$group_d$effort_per
-  )
+)
 
 # make sure the data contain no missing values
 number_missing_values <- lapply(stan_d, FUN = function(x) mean(is.na(x))) %>%
@@ -694,7 +911,7 @@ assert_that(no_missing_values)
 
 # make sure that all five methods made it in here
 assert_that(all(levels(train_d$group_d$method_factor) %in%
-    c("firearms", "fixed wing", "helicopter", "snare", "trap")))
+                  c("firearms", "fixed wing", "helicopter", "snare", "trap")))
 
 write_rds(merged_d, paste0(outDir, 'merged_d.rds'))
 write_rds(st_d, paste0(outDir, 'st_d.rds'))
@@ -787,3 +1004,4 @@ all.equal(Mik$STATE_NAME.x, Mik$STATE_NAME.y)
 all.equal(Mik$STATE_NAME.x, Mik$STATE_NAME)
 mikD <- Mik[Mik$FIPS==fips, startsWith(colnames(Mik), c("c_"))]
 maxD <- Max[Max$FIPS==fips, startsWith(colnames(Max), c("c_"))]
+#
