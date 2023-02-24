@@ -5,6 +5,18 @@
 
 get_timestep_df <- function(file) readRDS(file)
 
+get_configs <- function(file) config::get()
+
+get_states <- function(states_filter){
+  stcsv <- read_csv("data/counties/statePostalCodes.csv")
+  df <- stcsv
+  if(states_filter != "all"){
+    df <- stcsv |>
+      filter(Postal %in% states_filter)
+  }
+  return(df)
+}
+
 get_shp <- function(){
   shp <- readOGR(file.path("data", "counties"), "dtl.cnty.lower48.meters")
   # shp <- shp[shp@data$STATE_NAME == "Missouri",]
@@ -450,7 +462,7 @@ start_end <- function(merged_d){
 
 # Create a smaller data frame with spatiotemporal covs to avoid  ----------
 # redundant computations
-train_test <- function(survey_d, property_area_df, timestep_df, shp, state_filter){
+train_test <- function(survey_d, property_area_df, timestep_df, shp, states_filter){
 
   ecoregions <- readOGR(file.path('data', 'ecoregions'),
                         'Cnty.lower48.EcoRegions.Level2') %>%
@@ -460,8 +472,13 @@ train_test <- function(survey_d, property_area_df, timestep_df, shp, state_filte
   set.seed(123)
 
   st_d <- survey_d %>%
-    filter(state %in% state_filter,
-           countyname != "ST CLAIR") %>% # TODO remove when not subsetting to MO
+    filter(state %in% states_filter)
+
+  # if("MO" %in% states_filter){
+  #   st_d <- st_d |> filter(countyname != "ST CLAIR")
+  # }
+
+  st_d <- st_d |>
     distinct(FIPS_timestep, FIPS, timestep, LND010190D, agrp_prp_id,
              property_factor,
              c_hydroden, c_carnrich, c_crop, c_pasture, c_tree,
@@ -473,11 +490,11 @@ train_test <- function(survey_d, property_area_df, timestep_df, shp, state_filte
     ) %>%
     #select(c_cerealTV, c_fruitNutTV, c_ndviTV, c_precipTV, c_tminTV, c_tmaxTV) %>%
     # split into training, dev, & validation sets
-    mutate(group = sample(c('train', 'test', 'dev'),
-                          size = n(),
-                          #size=nrow(st_d),
-                          replace = TRUE,
-                          prob = c(0.7, 0.3, 0.05))) %>% # TODO: change these later
+    # mutate(group = sample(c('train', 'test', 'dev'),
+    #                       size = n(),
+    #                       #size=nrow(st_d),
+    #                       replace = TRUE,
+    #                       prob = c(0.7, 0.3, 0.05))) %>% # TODO: change these later
     left_join(property_area_df) %>%
     filter(property_area_km2 > 1) %>%
     left_join(ecoregions) %>%
@@ -489,9 +506,9 @@ train_test <- function(survey_d, property_area_df, timestep_df, shp, state_filte
 
 
 # Generate spatial neighbors ----------------------------------------------
-spatial_neighbors <- function(st_d, timestep_df, shp){
+spatial_neighbors <- function(st_d, timestep_df, shp, state_long){
 
-  shp <- shp[shp@data$STATE_NAME == "Missouri",]
+  shp <- shp[shp@data$STATE_NAME %in% state_long,]
   shp <- shp[toupper(shp@data$NAME) %in% unique(st_d$countyname),]
 
 
@@ -581,9 +598,38 @@ get_survey_outputs <- function(group, survey_d, st_d, property_area_df) {
   if(group == 'train') group <- c(group, "dev")
 
   group_d <- survey_d %>%
-    filter(FIPS_timestep %in%
-             st_d$FIPS_timestep[st_d$group %in% group]) %>%
+    filter(FIPS_timestep %in% unique(st_d$FIPS_timestep)) %>%
     left_join(property_area_df)
+
+  get_training <- function(v, n){
+    group_d |>
+      select(idx, .data[[v]], y) |>
+      group_by(.data[[v]]) |>
+      mutate(test_county = sample(c("train", "test"),
+                                  length(unique(.data[[v]])),
+                                  replace = TRUE,
+                                  prob = c(0.7, 0.3))) |>
+      ungroup() |>
+      mutate(y = ifelse(test_county == "train", y, NA)) |>
+      select(idx, y)
+  }
+
+  fips_train <- get_training("FIPS") |> rename("y_fips_train" = y)
+  timestep_train <- get_training("timestep") |> rename("y_timestep_train" = y)
+  fips_timestep_train <- get_training("FIPS_timestep") |> rename("y_fips_timestep_train" = y)
+  property_train <- get_training("agrp_prp_id") |> rename("y_property_train" = y)
+
+  group_d <- group_d |>
+    left_join(fips_train) |>
+    left_join(timestep_train) |>
+    left_join(fips_timestep_train) |>
+    left_join(property_train) |>
+    mutate(test_county = sample(c("train", "test"),
+                                n(),
+                                replace = TRUE,
+                                prob = c(0.7, 0.3))) |>
+    mutate(y_train = ifelse(test_county == "train", y, NA)) |>
+    select(-test_county)
 
   tar_assert_true(all(group_d$property_area_km2 > 1))
   tar_assert_true(nrow(group_d) < nrow(survey_d))
