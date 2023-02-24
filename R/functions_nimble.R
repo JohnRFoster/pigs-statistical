@@ -136,7 +136,7 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
         psrf = gelman.diag(s, multivariate = FALSE)$psrf[,2], # checking the upper CI
         effective_samples = effectiveSize(s)
       )
-      if(is.null(dim(s$chain1))) rownames(df) <- node
+      if(nrow(df) == 1) rownames(df) <- node
       return(df)
     }
 
