@@ -1,0 +1,212 @@
+---
+title: "MIS devlopment"
+author: "John Foster"
+format: pdf
+editor: visual
+execute: 
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+
+library(targets)
+library(tidyverse)
+library(lubridate)
+library(config)
+library(spdep)
+library(readxl)
+library(spatialreg)
+library(parallel)
+library(nimble)
+library(rgdal)
+library(coda)
+
+source("functions_nimble.R")
+source("functions_analysis.R")
+source("predict_dynamic.R")
+
+dir_top <- "../out"
+```
+
+```{r}
+
+config_names <- c("default", "test_spatial", "test_ricker")
+model_names <- c("Basic", "Spatial", "Ricker")
+
+all_params <- all_N <- all_po <- tibble()
+for(i in seq_along(config_names)){
+  Sys.setenv(R_CONFIG_ACTIVE = config_names[i])
+  config <- config::get()
+  dir_out <- config$dir_out
+  dir_model <- config$model_out
+  path <- file.path(dir_top, dir_out, dir_model)
+  
+  dest <- file.path(path, "thinnedSamples.rds")
+  if(!file.exists(dest)){
+    thin_samples(path, start = 1, override_trace = TRUE)
+  }
+  
+  samps <- read_rds(file.path(path, "thinnedSamples.rds"))  
+  nimble_in <- read_rds(file.path(path, "nimbleList.rds"))
+  
+  mcmc <- bind_cols(as_tibble(samps$params), as_tibble(samps$predict))
+  flags <- nimble_in$model_flags
+  unit_lookup <- nimble_in$unit_lookup
+
+  dest <- file.path(path, "parameterQuantiles.rds")
+  if(file.exists(dest)){
+    params_stats <- read_rds(dest)
+  } else {
+    params_stats <- make_parameters_tb(
+      mcmc_mat = samps$params,
+      spatial = flags$spatial,
+      model_name = model_names[i],
+      county_lookup = nimble_in$county_lookup,
+      dest = dest
+    )  
+  }
+  
+  dest <- file.path(path, "predictivePosteriorQuantiles.rds")
+  if(file.exists(dest)){
+    pp <- read_rds(dest)
+  } else {
+    sim <- simulate_nimble_dynamic(mcmc, flags, nimble_in$constants, nimble_in$data, unit_lookup)
+    pp <- pred_post(nimble_in$constants, nimble_in$data, sim$N, sim$yp, model_names[i], dest)  
+  }
+  
+  all_params <- bind_rows(all_params, params_stats)
+  all_N <- bind_rows(all_N, pp$abundance)
+  all_po <- bind_rows(all_po, pp$pred_obs)
+  
+}
+
+```
+
+### Population growth
+
+```{r}
+
+gg_lambda_constant(all_params)
+
+```
+
+```{r}
+
+gg_obs_intercepts(all_params)
+
+```
+
+```{r}
+
+gg_obs_slopes(all_params)
+
+```
+
+```{r}
+
+gg_gamma(all_params)
+
+```
+
+```{r}
+
+gg_rho(all_params)
+
+```
+
+```{r}
+
+gg_proc_error(all_params)
+```
+
+```{r}
+all_params |> 
+  filter(grepl("s[", node, fixed = TRUE),
+         state == "TEXAS") |>
+  mutate(Island = if_else(island == 1, "Island", "Non-island")) |> 
+  group_by(state) |> 
+  mutate(x = 1:n()) |> 
+  ungroup() |> 
+  ggplot() +
+  aes(x = cnty_idx, color = Island) +
+  geom_point(aes(y = median), size = 2) +
+  geom_linerange(aes(ymin = lower95, ymax = upper95), linewidth = 0.5) +
+  geom_linerange(aes(ymin = lower75, ymax = upper75), linewidth = 1) +
+  facet_wrap(~ state, scales = "free_x") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  coord_flip() +
+  theme_bw() +
+  labs(title = "Spatial autocorrelation",
+       y = "Effect",
+       x = "County") 
+
+
+```
+
+### Latent abundance of pigs
+
+```{r}
+
+cnty <- nimble_in$county_lookup |> 
+  rename(property_idx = property)
+
+all_N |> 
+  left_join(cnty) |> 
+  filter(state == "TEXAS",
+         cnty_name %in% c("KENT", "VICTORIA"),
+         property_idx %in% c(82, 313)) |>
+  mutate(Island = as.character(island)) |> 
+  ggplot() +
+  aes(x = timestep_idx, y = median, ymin = lower75, ymax = upper75, fill = Island) + 
+  geom_ribbon(alpha = 0.8) +
+  geom_point(aes(y = observed)) +
+  coord_cartesian(ylim = c(0, 100)) +
+  facet_grid(model ~ property_idx) +
+  theme_bw()
+```
+
+### expected observations
+
+```{r}
+
+all_po |> 
+  left_join(cnty) |> 
+  filter(state == "TEXAS",
+         cnty_name %in% c("KENT", "VICTORIA"),
+         property_idx %in% c(82, 313)) |>
+  mutate(Island = as.character(island)) |> 
+  ggplot() +
+  aes(x = timestep_idx, y = median, ymin = lower75, ymax = upper75, fill = Island) + 
+  geom_ribbon(alpha = 0.8) +
+  geom_point(aes(y = observed)) +
+  coord_cartesian(ylim = c(0, 100)) +
+  facet_grid(model ~ property_idx) +
+  theme_bw()
+
+
+```
+
+```{r}
+
+all_N |> 
+  ggplot() +
+  aes(x = observed, y = median) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1) +
+  theme_bw()
+```
+
+```{r}
+
+all_po |> 
+  ggplot() +
+  aes(x = observed, y = median) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1) +
+  theme_bw()
+
+
+
+```
