@@ -8,9 +8,6 @@
 # sigma_short, scalar, ??
 # z_shortR, matrix, B-spline spatial coefficient
 
-# TODO explicit indexing of all vectors and matrices - put params in for loop
-# TODO check that all log transformed variables are correct
-# TODO add uninformed priors for capture/effect coefficents
 # TODO finish list at top explaining the function and dimenstion of each param
 
 
@@ -31,6 +28,8 @@ modelCode <- nimbleCode({
 
   for(i in 1:n_method){
     p_unique[i] ~ dbeta(2, 2)
+    rho[i] ~ dgamma(0.1, 0.1)
+    # rho[i] ~ dlnorm(log_rho_prior[i, 1], log_rho_prior[i, 2])
   }
 
   for(i in 1:n_property){
@@ -57,11 +56,6 @@ modelCode <- nimbleCode({
   }
   gamma[4] ~ dgamma(gamma_prior[1, 1], gamma_prior[1, 2])         # snare
   gamma[5] ~ dgamma(gamma_prior[2, 1], gamma_prior[2, 2])         # trap
-
-  for(i in 1:n_method){
-    rho[i] ~ dgamma(0.1, 0.1)
-    # rho[i] ~ dlnorm(log_rho_prior[i, 1], log_rho_prior[i, 2])
-  }
 
   for(i in 1:n_survey){
 
@@ -134,3 +128,94 @@ modelCode <- nimbleCode({
   }
 
 })
+
+simulate_saturating <- function(post, constants, data){
+
+  within_data <- purrr::prepend(data, constants)
+
+  with(within_data,{
+    post <- as_tibble(post)
+    n_mcmc <- nrow(post)
+    sigma_property <- post |> pull("sigma_property") |> as.numeric()
+    sigma_property_p <- post |> pull("sigma_property_p") |> as.numeric()
+    sigma_short <- post |> pull("sigma_short") |> as.numeric()
+    eps_propertyR <- post |> select(contains("eps_propertyR")) |> as.data.frame()
+    eps_property_pR <- post |> select(contains("eps_property_pR")) |> as.data.frame()
+    p_unique <- post |> select(contains("p_unique")) |> as.data.frame()
+    rho <- post |> select(contains("rho")) |> as.data.frame()
+    gamma <- post |> select(contains("gamma")) |> as.data.frame()
+    beta_p <- post |> select(contains("beta_p")) |> as.data.frame()
+    beta <- post |> select(contains("beta[")) |> as.data.frame()
+    z_shortR <- post |> select(contains("z_shortR")) |> as.data.frame()
+
+    # storage
+    potential_area <- pr_area_sampled <- N <-  matrix(NA, n_mcmc, n_survey)
+    p <- theta_star <- theta <- potential_area
+    z_short <- array(NA, dim = c(m_short, n_county, n_mcmc))
+    lambda <- matrix(NA, n_mcmc, n_st)
+
+    eps_property <- eps_propertyR * sigma_property
+
+    message("calculate potential area for each survey")
+    pb <- txtProgressBar(max = n_survey, style = 3)
+    for(i in 1:n_survey){
+
+      potential_area[1:n_mcmc,i] <- exp(log(1 + p_unique[method[i]] * n_trap_m1[i]) + # all methods
+                                          ((log_pi + 2 * (log(rho[method[i]]) + log_effort_per[i] - log(gamma[method[i]] + effort_per[i]))) * trap_snare_ind[i]) + # traps and snares only
+                                          ((log(rho[method[i]]) + log_effort_per[i])) * shooting_ind[i])[,1] # shooting and aerial only
+
+      # area_constraint[i] ~ dconstraint(potential_area[i] <= survey_area_km2[i])
+      pr_area_sampled[,i] <- pmin(survey_area_km2[i], potential_area[,i])
+
+      setTxtProgressBar(pb, i)
+    }
+    close(pb)
+
+    message("Calculate lambda and p")
+    pb <- txtProgressBar(max = n_mcmc, style = 3)
+    for(m in 1:n_mcmc){
+      for(i in 1:n_county){
+        z_node1 <- paste0("z_shortR[1, ", i, "]")
+        z_short[1, i, m] <- z_shortR[m, z_node1]
+        for(j in 2:m_short){
+          z_node2 <- paste0("z_shortR[", j-1, ", ", i, "]")
+          z_node3 <- paste0("z_shortR[", j, ", ", i, "]")
+          z_short[j, i, m] <- z_shortR[m, z_node2] +
+            z_shortR[m, z_node3] * sigma_short[m]
+        }
+      }
+
+      for(i in 1:n_st){
+        lambda[m, i] <- exp(crossprod(X[i,], as.numeric(beta[m,])) + # non time varying covariates
+                              X_short[i, ] %*% z_short[, county_idx[i], m] + # B-spline vectors * basis vector coefficients
+                              eps_property[m, property[i]] + # property adjustment
+                              # eps_st[timestep[i], county_idx[i]] + # spatio-temporal adjustment
+                              log_area_km2[i])[1,1] # area offset
+      }
+
+      # probability of capture, given that an individual is in the surveyed area
+      for(i in 1:n_survey){
+        theta_star[m, i] <- boot::inv.logit((crossprod(X_p[i, ], as.numeric(beta_p[m, ])) + # beta_p[1:5] are random intercepts by method
+                                               eps_property_pR[m, p_property_idx[i]] * sigma_property_p[m])[,1])
+
+        theta[m,i] <- (pr_area_sampled[m,i] / survey_area_km2[i]) * theta_star[m,i]
+
+        # the probability an individual is captured
+        p[m, i] <- exp(log(theta[m, i]) +
+                         sum(log(1 - theta[m ,start[i]:end[i]])) * not_first_survey[i]) # if > 1st survey
+      }
+      setTxtProgressBar(pb, m)
+    }
+    close(pb)
+
+    # likelihood
+    for(i in 1:n_survey){
+      N[, i] <- rpois(n_mcmc, lambda[, survey_idx[i]] * p[, i])
+    }
+    return(list(
+      N = N,
+      lambda = lambda,
+      p = p
+    ))
+  })
+}
