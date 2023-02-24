@@ -132,10 +132,12 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
     # check convergence and effective sample size on specified node
     subset_check_mcmc <- function(node){
       s <- mcmc[,grep(node, colnames(mcmc[[1]]), value = TRUE, fixed = TRUE)]
-      data.frame(
+      df <- data.frame(
         psrf = gelman.diag(s, multivariate = FALSE)$psrf[,2], # checking the upper CI
         effective_samples = effectiveSize(s)
       )
+      if(is.null(dim(s$chain1))) rownames(df) <- node
+      return(df)
     }
 
     message("Checking convergence and sample size")
