@@ -473,6 +473,10 @@ if(run_parallel){
   Cmodel <- compileNimble(Rmodel)
   Cmcmc <- compileNimble(Rmcmc)
   samples <- runMCMC(Cmcmc, nchains = 1, niter = 200)
+
+  ss  <- as.matrix(samples)
+  # plot(exp(ss[, "log_r_mu"]), type="l")
+  # plot(exp(ss[, "xn[211]"]), type="l")
 }
 
 
