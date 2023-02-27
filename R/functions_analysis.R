@@ -33,7 +33,8 @@ subset_check_burnin <- function(node, plot = FALSE){
 # load output
 ######
 get_samples <- function(path, ...){
-  out_mcmc <- get_mcmc_chunks(path, type = c("params", "predict"), ...)
+  source("R/functions_nimble.R")
+  out_mcmc <- get_mcmc_chunks(path, ...)
   model_inputs <- read_rds(file.path(path, "nimbleList.rds"))
   return(
     list(
