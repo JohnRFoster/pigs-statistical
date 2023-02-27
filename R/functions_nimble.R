@@ -6,10 +6,12 @@ get_mcmc_chunks <- function(path, start = 1, stop = NULL){
   chunk_params <- list()
   chunk_predict <- list()
   pb <- txtProgressBar(max = length(start:stop), style = 3)
+  j <- 1
   for(i in start:stop){
     cN <- read_rds(file.path(path, mcmc_files[[i]]))
-    chunk_params[[i]] <- cN$params
-    chunk_predict[[i]] <- cN$predict
+    chunk_params[[j]] <- cN$params
+    chunk_predict[[j]] <- cN$predict
+    j <- j + 1
     setTxtProgressBar(pb, i)
   }
   close(pb)
@@ -258,6 +260,29 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
     diagnostic = diagnostic$checks
   ))
 }
+
+# function from https://groups.google.com/g/nimble-users/c/i8U54pSGSLs/m/QlCS8hjEBQAJ
+count_by_site <- nimbleFunction(
+  run = function(
+    group = double(1),
+    z = double(1),
+    ngroup = integer(0)
+  ) {
+
+    M <- length(group)
+    N <- numeric(ngroup)
+
+    for(i in 1:M) {
+      if(z[i] == 1) {
+        N[group[i]] <- N[group[i]] + 1
+      }
+    }
+
+    return(N) # brackets are only necessary in model code, not nimbleFunction
+    returnType(double(1))
+  }
+
+)
 
 
 # make_inits_function <- function(inits_dir, constants = NULL, data = NULL){
