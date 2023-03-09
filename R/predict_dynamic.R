@@ -94,10 +94,10 @@ simulate_nimble_dynamic <- function(mcmc, flags, constants, data, unit_lookup){
 
       # probability of capture, given that an individual is in the surveyed area
       theta_star <- boot::inv.logit(
-        beta_p[, 1] +
-        X_p[i, 1] * beta_p[, 2] +
-        X_p[i, 2] * beta_p[, 3] +
-        X_p[i, 3] * beta_p[, 4])
+        beta[, 1] +
+        X_p[i, 1] * beta[, 2] +
+        X_p[i, 2] * beta[, 3] +
+        X_p[i, 3] * beta[, 4])
         # eps_property_pR[, eps_node] * sigma_property_p)
 
       log_theta[, i] <- log_pr_area_sampled - log_survey_area_km2[i] + log(theta_star)
