@@ -13,6 +13,11 @@ modelCode <- nimbleCode({
     }
   }
 
+  if(jamiesonBrooks | dennisTaper){
+    beta_r ~ dnorm(0, tau = 1)
+  }
+
+
   tau_proc ~ dgamma(0.01, 0.01)
 
 
@@ -56,7 +61,7 @@ modelCode <- nimbleCode({
   if(spatial){
     sigma_car ~ dunif(0, 100)   # prior for variance components based on Gelman (2006)
     tau_car <- 1 / sigma_car^2
-    s_car[1:n_non_islands] ~ dcar_normal(
+    log_s_car[1:n_non_islands] ~ dcar_normal(
       adj = adj[1:n_edges],
       weights = weights[1:n_edges],
       num = num[1:n_non_islands],
@@ -66,14 +71,14 @@ modelCode <- nimbleCode({
     )
 
     for(i in 1:n_non_islands){
-      s[non_islands[i]] <- log(s_car[i])
+      log_s[non_islands[i]] <- log_s_car[i]
     }
     for(i in 1:n_islands){
-      s_island[i] ~ dnorm(0, tau = 1)
-      s[islands[i]] <- s_island[i]
+      log_s_island[i] ~ dnorm(0, tau = 1)
+      log_s[islands[i]] <- log_s_island[i]
     }
   } else {
-    s[1:n_county] <- 1
+    log_s[1:n_county] <- 0
   }
 
 
@@ -123,20 +128,33 @@ modelCode <- nimbleCode({
       if(exponential){
         ex[i, t] <- x[i, t-1] +
           log_r[i, t] +
-          s[county_idx[i]]
+          log_s[county_idx[i]]
       }
 
       if(ricker){
         ex[i, t] <- x[i, t-1] +
           exp(log_r[i, t] + log(1 - exp(x[i, t-1] - log_k[i]))) +
-          s[county_idx[i]]
+          log_s[county_idx[i]]
       }
 
       if(gompertz){
         ex[i, t] <- x[i, t-1] +
           exp(log_r[i, t] +
                 log(1 - exp(log(log(exp(x[i, t-1]) + 1)) - log(log(exp(log_k[i]) + 1))))) +
-          s[county_idx[i]]
+          log_s[county_idx[i]]
+      }
+
+      if(jamiesonBrooks){
+        ex[i, t] <- x[i, t-1] +
+          log_r[i, t] +
+          beta_r*exp(x[i, t-1]) +
+          log_s[county_idx[i]]
+      }
+
+      if(dennisTaper){
+        ex[i, t] <- log_r[i, t] +
+          (1 + beta_r)*x[i, t-1] +
+          log_s[county_idx[i]]
       }
 
       # population growth across time steps
