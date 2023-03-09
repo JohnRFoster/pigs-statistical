@@ -9,8 +9,7 @@ library(parallel)
 library(nimble)
 library(rgdal)
 
-config_name <- "ricker"
-
+config_name <- "dennisTaper"
 config_ls <- get(config = config_name)
 list2env(config_ls, .GlobalEnv)
 
@@ -38,33 +37,6 @@ property_info <- sample_units |>
   select(agrp_prp_id, state, cnty_name, st_gsa_state_cd, cnty_gsa_cnty_cd, fips,
          property_area_km2, state_abr, countyfp) |>
   distinct()
-
-# function to fill in missing timesteps and information for a given property
-# create_all_timesteps <- function(df, prop){
-#   # take data for property
-#   take <- df |>
-#     filter(agrp_prp_id == prop) |>
-#     arrange(timestep)
-#
-#   timesteps <- unique(take$timestep)
-#   all_time <- min(timesteps):max(timesteps)
-#   missing_timesteps <- setdiff(all_time, timesteps)
-#
-#   if(length(missing_timesteps) > 0){
-#     # property info
-#     info <- property_info |>
-#       filter(agrp_prp_id == prop)
-#
-#     st <- tibble(agrp_prp_id = prop,
-#                  timestep = rep(missing_timesteps, each=2)) |>
-#       left_join(info) |>
-#       bind_rows(take) |>
-#       arrange(timestep)
-#     return(st)
-#   } else {
-#     return(take)
-#   }
-# }
 
 # create data frame with all timesteps for each property
 st_all <- sample_units |>
@@ -198,7 +170,7 @@ max_reps <- max(reps_df$n)
 
 y <- H <- array(NA, dim = c(n_property, max_timesteps, max_reps))
 n_reps <- timestep <-  matrix(NA, n_property, max_timesteps)
-n_timesteps <- rep(NA, nrow(timesteps_df))
+n_timesteps <- rep(NA, n_property)
 for(i in 1:n_property){
   prop <- properties[i]
   n_timesteps[i] <- n_timesteps_prop |>
@@ -342,27 +314,8 @@ constants <- list(
   n_units = nrow(unit_lookup),
   property_x = unit_lookup$property_idx,
   timestep_x = unit_lookup$timestep,
-  log_k = log(property_lookup$property_area_km2) + log(25)
-  # log_property_area = log(property_lookup$property_area_km2),
-  # log_max_density = log(15)
+  log_k = log(property_lookup$property_area_km2) + log(50)
 )
-
-inits <- function(){
-  N_init <- (rowSums(data$y, dims = 2, na.rm = TRUE) + 1)
-  ls <- list(
-    N = N_init,
-    x = log(N_init),
-    log_gamma = rnorm(5),
-    log_rho = rnorm(5),
-    beta_p = matrix(rnorm(constants$n_method*constants$n_beta_p, 0, 0.1), constants$n_method, constants$n_beta_p),
-    p_mu = rnorm(constants$n_method),
-    log_r_mu = runif(1, 0, 1),
-    tau_proc = runif(1, 1, 10)
-  )
-  return(ls)
-}
-
-
 
 dest <- file.path(out_dir, model_dir)
 if(!dir.exists(dest)) dir.create(dest, recursive = TRUE, showWarnings = FALSE)
@@ -380,15 +333,41 @@ write_rds(
 )
 
 
-
 source(model_file)
 source("R/functions_nimble.R")
 
-custom_samplers <- data.frame(
-  node = c("beta_p",   "log_rho",  "log_gamma", "p_mu",     "log_r_mu"),
-  type = c("AF_slice", "AF_slice", "AF_slice",  "AF_slice", "ess")
-)
+# inits <- make_inits_function(NULL, constants = constants, data = data)
+inits <- make_inits_function(file.path(out_dir, inits_dir))
 
+# custom_samplers <- tibble(
+#   node = c("p_mu"),
+#   type = c("AF_slice")
+# )
+
+custom_samplers <- NULL
+
+
+# for(i in seq_len(constants$n_method)){
+#   beta_node <- paste0("beta_p[", i, ", ", 1:constants$n_beta_p, "]")
+#   beta_type <- "RW_block"
+#
+#   # rho_node <- paste0("log_rho[", i, "]")
+#   # rho_type <- "slice"
+#   #
+#   # gamma_node <- paste0("log_gamma[", i, "]")
+#   # gamma_type <- "slice"
+#
+#   p_node <- paste0("p_mu[", i, "]")
+#   p_type <- "slice"
+#
+#   cs_i <- tibble(
+#     node = c(list(beta_node), p_node),
+#     type = c(beta_type, p_type)
+#   )
+#
+#   custom_samplers <- bind_rows(custom_samplers, cs_i)
+#
+# }
 
 if(run_parallel){
   message("Build cluster")
@@ -403,10 +382,10 @@ if(run_parallel){
       n_iter = n_iter,
       n_burnin = 0,
       params_check = params_check,
-      custom_samplers = custom_samplers,
+      custom_samplers = NULL,
       model_flags = model_flags,
       state.col = "xn",
-      max_iter = 200000,
+      max_iter = 500000,
       dest = dest,
       resetMV = TRUE,
       save_iter = TRUE
@@ -442,6 +421,8 @@ if(run_parallel){
   exponential <- if_else(process_type == "exponential", TRUE, FALSE)
   ricker <- if_else(process_type == "ricker", TRUE, FALSE)
   gompertz <- if_else(process_type == "gompertz", TRUE, FALSE)
+  jamiesonBrooks <- if_else(process_type == "jamiesonBrooks", TRUE, FALSE)
+  dennisTaper <- if_else(process_type == "dennisTaper", TRUE, FALSE)
 
   Rmodel <- nimbleModel(
     code = modelCode,
@@ -458,7 +439,7 @@ if(run_parallel){
 
   if(!is.null(custom_samplers)){
     for(i in seq_len(nrow(custom_samplers))){
-      node <- custom_samplers$node[i]
+      node <- custom_samplers$node[i][[1]]
       type <- custom_samplers$type[i]
       mcmcConf$removeSampler(node)
       mcmcConf$addSampler(node, type)
@@ -477,6 +458,8 @@ if(run_parallel){
   ss  <- as.matrix(samples)
   # plot(exp(ss[, "log_r_mu"]), type="l")
   # plot(exp(ss[, "xn[211]"]), type="l")
+  # plot(exp(ss[, "log_rho[4]"]), type="l")
+  # plot(exp(ss[, "beta_r"]), type="l")
 }
 
 
