@@ -33,7 +33,7 @@ subset_check_burnin <- function(node, plot = FALSE){
 # load output
 ######
 get_samples <- function(path, ...){
-  source("R/functions_nimble.R")
+  # source("R/functions_nimble.R")
   out_mcmc <- get_mcmc_chunks(path, ...)
   model_inputs <- read_rds(file.path(path, "nimbleList.rds"))
   return(
@@ -180,7 +180,7 @@ make_parameters_tb <- function(mcmc_mat, spatial, model_name, quants = TRUE, cou
     mutate_method()
 
   lambda <- out |>
-    filter(node == "log_lambda_mu") |>
+    filter(node == "log_r_mu") |>
     mutate(
       name = "Population growth",
       parameter = "Population growth",
@@ -193,13 +193,22 @@ make_parameters_tb <- function(mcmc_mat, spatial, model_name, quants = TRUE, cou
       parameter = "Process error",
       value = 1/sqrt(value))
 
+  beta_r <- tibble()
+  if("beta_r" %in% unique(out$node)){
+    beta_r <- out |>
+      filter(node == "beta_r") |>
+      mutate(name = "Density dependence effect",
+             parameter = "Density dependence effect")
+  }
+
   all_params <- bind_rows(
     obs_betas,
     gamma,
     rho,
     p,
     lambda,
-    tau_proc
+    tau_proc,
+    beta_r
   )
 
   if(spatial){
@@ -247,7 +256,8 @@ make_parameters_tb <- function(mcmc_mat, spatial, model_name, quants = TRUE, cou
   }
 
   xx <- params_stats |>
-    mutate(model = model_name)
+    mutate(model = model_name) |>
+    ungroup()
 
   write_rds(xx, dest)
   return(xx)
