@@ -12,14 +12,18 @@ simulate_nimble_dynamic <- function(mcmc, flags, constants, data, unit_lookup){
     log_rho <- mcmc |> select(contains("log_rho")) |> as.matrix()
     p_unique <- mcmc |> select(contains("p_unique")) |> as.matrix()
     beta_p <- mcmc |> select(contains("beta_p")) |> as.matrix()
-    tau_proc <- mcmc |> pull("tau_proc")
+    sigma_proc <- mcmc |> mutate(sigma_proc = 1/sqrt(tau_proc)) |> pull(sigma_proc)
     X_p <- as.matrix(X_p)
     n_mcmc <- nrow(beta_p)
 
-    log_lambda_mu <- mcmc |> pull("log_lambda_mu")
-    lambda_t <- matrix(NA, n_mcmc, n_pp)
+    if(process_type %in% c("jamiesonBrooks", "dennisTaper")){
+      beta_r <- mcmc |> pull(beta_r)
+    }
+
+    log_r_mu <- mcmc |> pull("log_r_mu")
+    r_t <- matrix(NA, n_mcmc, n_pp)
     for(i in 1:n_pp){
-      lambda_t[,i] <- log_lambda_mu
+      r_t[,i] <- log_r_mu
     }
 
     units <- unit_lookup |> mutate(index = 1:n())
@@ -30,7 +34,7 @@ simulate_nimble_dynamic <- function(mcmc, flags, constants, data, unit_lookup){
                    names_to = "node") |>
       mutate(index = as.numeric(str_extract(node, "\\d*(?=\\])"))) |>
       left_join(units) |>
-      mutate(node = paste0("x[", property, ", ", pp, "]")) |>
+      mutate(node = paste0("x[", property_idx, ", ", timestep, "]")) |>
       select(iter, value, node) |>
       pivot_wider(names_from = node,
                   values_from = value) |>
@@ -86,16 +90,15 @@ simulate_nimble_dynamic <- function(mcmc, flags, constants, data, unit_lookup){
       b_nodes <- paste0("beta_p[", method[i])
       beta <- beta_p[,grep(b_nodes, colnames(beta_p), fixed = TRUE)]
 
-      eps_node <- paste0("eps_property_pR[", p_property_idx[i], "]")
+      # eps_node <- paste0("eps_property_pR[", p_property_idx[i], "]")
 
       # probability of capture, given that an individual is in the surveyed area
       theta_star <- boot::inv.logit(
         beta_p[, 1] +
         X_p[i, 1] * beta_p[, 2] +
         X_p[i, 2] * beta_p[, 3] +
-        X_p[i, 3] * beta_p[, 4] +
-        eps_property_pR[, eps_node] * sigma_property_p)
-
+        X_p[i, 3] * beta_p[, 4])
+        # eps_property_pR[, eps_node] * sigma_property_p)
 
       log_theta[, i] <- log_pr_area_sampled - log_survey_area_km2[i] + log(theta_star)
 
@@ -145,21 +148,41 @@ simulate_nimble_dynamic <- function(mcmc, flags, constants, data, unit_lookup){
         # population growth across time steps
         l_seq <- (timestep[i, t-1]+1):timestep[i, t]
         if(length(l_seq) == 1){
-          log_lambda <- lambda_t[,l_seq]
+          log_r <- r_t[,l_seq]
         } else {
-          log_lambda <- apply(lambda_t[,l_seq], 1, sum)
+          log_r <- apply(r_t[,l_seq], 1, sum)
         }
 
         # sampling unit is the primary period in a property
         x_node <- paste0("x[", i, ", ", t-1, "]")
         s_node <- paste0("s[", county_idx[i], "]")
 
-        mu <- x[, x_node] +
-          log_lambda +
-          log(s[, s_node])
+        if(process_type == "exponential"){
+          mu <- x[, x_node] +
+            log_r +
+            log(s[, s_node])
+        } else if(process_type == "ricker"){
+          mu <-  x[, x_node] +
+            exp(log_r + log(1 - exp(x[, x_node] - log_k[i]))) +
+            log(s[, s_node])
+        } else if(process_type == "gompertz"){
+          mu <- x[, x_node] +
+            exp(log_r +
+                  log(1 - exp(log(log(exp(x[, x_node]) + 1)) - log(log(exp(log_k[i]) + 1))))) +
+            log(s[, s_node])
+        } else if(process_type == "jamiesonBrooks"){
+          mu <- x[i, x_node] +
+            log_r +
+            beta_r*exp(x[i, x_node]) +
+            log(s[, s_node])
+        } else if(process_type == "dennisTaper"){
+          mu <- log_r +
+            (1 + beta_r)*x[i, x_node] +
+            log(s[, s_node])
+        }
 
-        mu <- pmin(25, mu)
-        x_pred <- rnorm(n_mcmc, mu, 1/sqrt(tau_proc))
+        # mu <- pmin(25, mu)
+        x_pred <- rnorm(n_mcmc, mu, sigma_proc)
         N[i, t, ] <- rpois(n_mcmc, exp(x_pred))
 
         # likelihood at first rep in > 1 PP
