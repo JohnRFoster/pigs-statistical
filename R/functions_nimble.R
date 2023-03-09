@@ -91,6 +91,8 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
     exponential <- dplyr::if_else(process_type == "exponential", TRUE, FALSE)
     ricker <- dplyr::if_else(process_type == "ricker", TRUE, FALSE)
     gompertz <- dplyr::if_else(process_type == "gompertz", TRUE, FALSE)
+    jamiesonBrooks <- dplyr::if_else(process_type == "jamiesonBrooks", TRUE, FALSE)
+    dennisTaper <- dplyr::if_else(process_type == "dennisTaper", TRUE, FALSE)
 
     Rmodel <- nimbleModel(
       code = model_code,
@@ -285,31 +287,62 @@ count_by_site <- nimbleFunction(
 )
 
 
-# make_inits_function <- function(inits_dir, constants = NULL, data = NULL){
-#   if(is.null(inits_dir)){
-#     inits <- function(){
-#       N_init <- (rowSums(data$y, dims = 2, na.rm = TRUE) + 1) * 5
-#       ls <- list(
-#         N =  N_init,
-#         x =  log(N_init),
-#         log_gamma = rnorm(1),
-#         log_rho = rnorm(1),
-#         beta_p = matrix(rnorm(constants$n_method*constants$n_beta_p, 0, 0.1), constants$n_method, constants$n_beta_p),
-#         p_unique = rbeta(constants$n_method, 1, 1),
-#         r_mu = rexp(1, 1),
-#         tau_proc = runif(1, 1, 10)
-#       )
-#       return(ls)
-#     }
-#   } else {
-#     samples <- read_rds(file.path(inits_dir, "thinnedSamples.rds"))
-#     params_mu <- apply(samples$params, 2, mean)
-#     states_mu <- apply(samples$predict, 2, mean)
-#
-#     inits
-#
-#   }
-#   return(inits)
-# }
+make_inits_function <- function(inits_dir, constants = NULL, data = NULL){
+  if(is.null(inits_dir)){
+    inits <- function(){
+      N_init <- (rowSums(data$y, dims = 2, na.rm = TRUE) + 1)
+      ls <- list(
+        N = N_init,
+        x = log(N_init),
+        log_gamma = rnorm(5),
+        log_rho = rnorm(5),
+        beta_p = matrix(rnorm(constants$n_method*constants$n_beta_p, 0, 0.1), constants$n_method, constants$n_beta_p),
+        p_mu = rnorm(constants$n_method),
+        log_r_mu = runif(1, 0, 1),
+        tau_proc = runif(1, 1, 10)
+      )
+      return(ls)
+    }
+  } else {
+    samples <- read_rds(file.path(inits_dir, "thinnedSamples.rds"))
+    params_mu <- apply(samples$params, 2, mean)
+    states_mu <- apply(samples$predict, 2, mean)
+
+    beta_p <- params_mu[grep("beta_p", names(params_mu))]
+    log_gamma <- params_mu[grep("log_gamma", names(params_mu))]
+    log_rho <- params_mu[grep("log_rho", names(params_mu))]
+    log_r_mu <- params_mu[grep("log_r_mu", names(params_mu))]
+    p_unique <- params_mu[grep("p_unique", names(params_mu))]
+    tau_proc <- params_mu[grep("tau_proc", names(params_mu))]
+
+    nim <- read_rds(file.path(inits_dir, "nimbleList.rds"))
+    unit_lookup <- nim$unit_lookup
+
+    N <- round(exp(states_mu)+1) |>
+      as_tibble() |>
+      mutate(property = unit_lookup$property_idx,
+             timestep = unit_lookup$timestep) |>
+      pivot_wider(names_from = timestep,
+                  values_from = value) |>
+      select(-property) |>
+      as.matrix()
+
+    inits <- function(){
+      list(
+        N = N,
+        x = log(N + 1),
+        log_gamma = rnorm(length(log_gamma), log_gamma, 0.05),
+        log_rho = rnorm(length(log_rho), log_gamma, 0.05),
+        p_mu = rnorm(length(p_unique), boot::logit(p_unique), 0.05),
+        beta_p = matrix(rnorm(length(beta_p), beta_p, 0.05), 5, 4),
+        log_r_mu = rnorm(length(log_r_mu), log_r_mu, 0.05),
+        tau_proc = abs(rnorm(1, tau_proc, 0.05)),
+        beta_r = rnorm(1, 0, 0.05)
+      )
+    }
+
+  }
+  return(inits)
+}
 
 
