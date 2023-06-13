@@ -65,8 +65,8 @@ convergence_check <- function(mcmc, params_check, verbose = TRUE){
         as.data.frame() |>
         print()
     }
-    message("Setting burnin start to iteration 1000")
-    burnin <- 1000
+    message("Returning NA for burnin!")
+    burnin <- NA
   }
   return(
     list(
@@ -90,19 +90,50 @@ thin_samples <- function(path, start, override_trace = FALSE, ...){
   traceplots <- any(grepl("traceplots", list.files(path)))
   plot <- if_else(traceplots, override_trace, TRUE)
 
-  if(plot){
-    message("creating traceplots...")
+  plot_sub <- function(mcmc, filename){
+    message(paste0("Creating ", filename))
     pdf(
-      file = file.path(path, "traceplots.pdf"),
+      file = filename,
       onefile = TRUE
     )
-    plot(params)
+    plot(mcmc)
     dev.off()
     message("  done")
   }
 
+
+  # if(plot){
+  #
+  #   psub <- params
+  #
+  #   if(any(grepl("size", colnames(as.matrix(params))))){
+  #     psub <- split_out(psub, "size")
+  #     # plot_sub(psub$predict, file.path(path, "traceplots_size.pdf"))
+  #     psub <- psub$params
+  #   }
+  #
+  #   if(any(grepl("log_zeta_global", colnames(as.matrix(params))))){
+  #     psub <- split_out(psub, "log_zeta")
+  #     plot_sub(psub$predict, file.path(path, "traceplots_log_zeta.pdf"))
+  #     psub <- psub$params
+  #   }
+  #
+  #   if(any(grepl("logit_phi_global", colnames(as.matrix(params))))){
+  #     psub <- split_out(psub, "log_phi")
+  #     plot_sub(psub$predict, file.path(path, "traceplots_logit_phi.pdf"))
+  #     psub <- psub$params
+  #   }
+  #
+  #   plot_sub(psub, file.path(path, "traceplots.pdf"))
+  #
+  # }
+
   converge <- convergence_check(params, params_check)
   burnin <- converge$burnin
+
+  if(is.na(burnin)){
+    burnin <- round(nrow(as.matrix(params[[1]])) / 2)
+  }
 
   param_burn <- window(params, start = burnin)
   params_mat <- as.matrix(param_burn)
@@ -201,6 +232,54 @@ make_parameters_tb <- function(mcmc_mat, spatial, model_name, quants = TRUE, cou
              parameter = "Density dependence effect")
   }
 
+  phi_static <- out |>
+    filter(node == "logit_phi") |>
+    mutate(name = "Apparent survival",
+           parameter = "Apparent survival",
+           value = nimble::ilogit(value))
+
+  phi_pp <- out |>
+    filter(grepl("logit_phi[", node, fixed = TRUE)) |>
+    mutate(name = "Apparent survival PP",
+           parameter = (str_extract(node, "\\d*(?=\\])")),
+           value = nimble::ilogit(value))
+
+  phi_pp_global <- out |>
+    filter(node == "logit_phi_global") |>
+    mutate(name = "Mean apparent survival",
+           parameter = "Mean apparent survival",
+           value = nimble::ilogit(value))
+
+  tau_phi <- out |>
+    filter(node == "tau_phi") |>
+    mutate(name = "Population SD",
+           parameter = "Survival",
+           value =  1/sqrt(value))
+
+  zeta_static <- out |>
+    filter(node == "log_zeta") |>
+    mutate(name = "Per capita recruitment",
+           parameter = "Per capita recruitment",
+           value = exp(value))
+
+  zeta_pp <- out |>
+    filter(grepl("log_zeta[", node, fixed = TRUE)) |>
+    mutate(name = "Per capita recruitment PP",
+           parameter = (str_extract(node, "\\d*(?=\\])")),
+           value = nimble::ilogit(value))
+
+  zeta_pp_global <- out |>
+    filter(node == "log_zeta_global") |>
+    mutate(name = "Mean per capita recruitment",
+           parameter = "Mean per capita recruitment",
+           value = nimble::ilogit(value))
+
+  tau_zeta <- out |>
+    filter(node == "tau_zeta") |>
+    mutate(name = "Population SD",
+           parameter = "Per capita recruitment",
+           value =  1/sqrt(value))
+
   all_params <- bind_rows(
     obs_betas,
     gamma,
@@ -208,7 +287,15 @@ make_parameters_tb <- function(mcmc_mat, spatial, model_name, quants = TRUE, cou
     p,
     lambda,
     tau_proc,
-    beta_r
+    beta_r,
+    phi_static,
+    phi_pp,
+    phi_pp_global,
+    tau_phi,
+    zeta_static,
+    zeta_pp,
+    zeta_pp_global,
+    tau_zeta
   )
 
   if(spatial){
@@ -271,52 +358,123 @@ rmse <- function(actual, predicted){
   sqrt(mean((actual - predicted)^2))
 }
 
-pred_post <- function(constants, data, pp_N, pp_yp, model_name, dest){
+pred_post <- function(constants, data, pp_N, pp_yp, model_name, dest, unit_lookup){
   data$N <- pp_N
   data$yp <- pp_yp
   data$model_name <- model_name
+
   ls <- purrr::prepend(constants, data)
   pp <- with(ls, {
     abundance <- pred_obs <- tibble()
     for(i in 1:n_property){
+      prop_id <- unit_lookup |>
+        filter(property_idx == i) |>
+        pull(agrp_prp_id) |>
+        unique()
       for(t in 1:n_timesteps[i]){
         value <- N[i, t, ]
+        log_value_p1 <- value#log(value + 1)
         if(any(is.na(value))) message(i, " ", t)
         qs_a <- tibble(
-          lower95 = quantile(value, 0.025),
-          lower75 = quantile(value, 0.125),
-          median = quantile(value, 0.5),
-          upper75 = quantile(value, 0.875),
-          upper95 = quantile(value, 0.975),
+          lower95 = quantile(log_value_p1, 0.025),
+          lower75 = quantile(log_value_p1, 0.125),
+          median = quantile(log_value_p1, 0.5),
+          upper75 = quantile(log_value_p1, 0.875),
+          upper95 = quantile(log_value_p1, 0.975),
           observed = sum(y[i, t, 1:n_reps[i, t]]),
           rmse = rmse(observed, value),
           crps = scoringRules::crps_sample(observed, value),
           property_idx = i,
           timestep_idx = t,
+          agrp_prp_id = prop_id,
           model = model_name
         )
         abundance <- bind_rows(abundance, qs_a)
 
         for(j in 1:n_reps[i, t]){
           value <- yp[i, t, j, ]
+          log_value_p1 <- value#log(value + 1)
           if(any(is.na(value))) message(i, " ", t, " ", j)
           qs_y <- tibble(
-            lower95 = quantile(value, 0.025),
-            lower75 = quantile(value, 0.125),
-            median = quantile(value, 0.5),
-            upper75 = quantile(value, 0.875),
-            upper95 = quantile(value, 0.975),
+            lower95 = quantile(log_value_p1, 0.025),
+            lower75 = quantile(log_value_p1, 0.125),
+            median = quantile(log_value_p1, 0.5),
+            upper75 = quantile(log_value_p1, 0.875),
+            upper95 = quantile(log_value_p1, 0.975),
             observed = data$y[i, t, j],
             rmse = rmse(observed, value),
             crps = scoringRules::crps_sample(observed, value),
             property_idx = i,
             timestep_idx = t,
             pass = j,
+            agrp_prp_id = prop_id,
             model = model_name
           )
           pred_obs <- bind_rows(pred_obs, qs_y)
         }
       }
+    }
+    list(abundance = abundance, pred_obs = pred_obs)
+  })
+  write_rds(pp, dest)
+  return(pp)
+}
+
+pred_post_dm <- function(constants, data, pp_N, pp_yp, model_name, dest, unit_lookup){
+  data$N <- pp_N
+  data$yp <- pp_yp
+  data$model_name <- model_name
+
+  ls <- purrr::prepend(constants, data)
+  pp <- with(ls, {
+    abundance <- pred_obs <- tibble()
+    for(i in 1:n_survey){
+
+      value <- N[p_property_idx[i], p_timestep_idx[i], ]
+      log_value_p1 <- value#log(value + 1)
+
+      prop_id <- unit_lookup |>
+        filter(property_idx == p_property_idx[i]) |>
+        pull(agrp_prp_id) |>
+        unique()
+
+      if(any(is.na(value))) message(i, " ", t)
+      qs_a <- tibble(
+        lower95 = quantile(log_value_p1, 0.025),
+        lower75 = quantile(log_value_p1, 0.125),
+        median = quantile(log_value_p1, 0.5),
+        upper75 = quantile(log_value_p1, 0.875),
+        upper95 = quantile(log_value_p1, 0.975),
+        observed = y_sum[i],
+        rmse = rmse(observed, value),
+        crps = scoringRules::crps_sample(observed, value),
+        property_idx = p_property_idx[i],
+        timestep_idx = p_timestep_idx[i],
+        agrp_prp_id = prop_id,
+        model = model_name
+      )
+      abundance <- bind_rows(abundance, qs_a)
+
+      value <- yp[, i]
+      log_value_p1 <- value#log(value + 1)
+      if(any(is.na(value))) message(i, " ", t, " ", j)
+        qs_y <- tibble(
+          lower95 = quantile(log_value_p1, 0.025),
+          lower75 = quantile(log_value_p1, 0.125),
+          median = quantile(log_value_p1, 0.5),
+          upper75 = quantile(log_value_p1, 0.875),
+          upper95 = quantile(log_value_p1, 0.975),
+          observed = data$y[i],
+          rmse = rmse(observed, value),
+          crps = scoringRules::crps_sample(observed, value),
+          property_idx = p_property_idx[i],
+          timestep_idx = p_timestep_idx[i],
+          agrp_prp_id = prop_id,
+          # pass = j,
+          model = model_name
+        )
+        pred_obs <- bind_rows(pred_obs, qs_y)
+
     }
     list(abundance = abundance, pred_obs = pred_obs)
   })
@@ -345,7 +503,7 @@ gg_lambda_constant <- function(df, ...){
   gg <- df |>
     filter(parameter == "Population growth") |>
     ggplot() +
-    aes(x = model, color = model)
+    aes(x = model)
 
   gg_stats(gg, ...) +
     geom_hline(yintercept = 1, linetype = "dashed") +
@@ -377,7 +535,9 @@ gg_obs_intercepts <- function(df, ...){
 ######
 gg_obs_slopes <- function(df, ...){
   df |>
-    filter(grepl("Slope", parameter)) |>
+    filter(grepl("road density", parameter) |
+             grepl("ruggedness", parameter) |
+             grepl("canopy cover", parameter)) |>
     ggplot() +
     aes(x = parameter, color = model) +
     geom_point(aes(y = median), size = 2, position = position_dodge(width=0.5)) +
