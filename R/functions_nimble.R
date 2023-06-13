@@ -86,13 +86,26 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
   out <- clusterEvalQ(cl, {
     library(nimble)
     library(coda)
+    # library(dplyr)
 
     list2env(model_flags, .GlobalEnv)
+    likelihood_nb <- dplyr::if_else(likelihood == "nb", TRUE, FALSE)
+    likelihood_binom <- dplyr::if_else(likelihood_nb, FALSE, TRUE)
+
     exponential <- dplyr::if_else(process_type == "exponential", TRUE, FALSE)
     ricker <- dplyr::if_else(process_type == "ricker", TRUE, FALSE)
     gompertz <- dplyr::if_else(process_type == "gompertz", TRUE, FALSE)
     jamiesonBrooks <- dplyr::if_else(process_type == "jamiesonBrooks", TRUE, FALSE)
     dennisTaper <- dplyr::if_else(process_type == "dennisTaper", TRUE, FALSE)
+
+    zeta_constant <- dplyr::if_else(process_type == "static", TRUE, FALSE)
+    zeta_pp <- dplyr::if_else(process_type == "zeta_pp", TRUE, FALSE)
+
+    zeta_pp <- dplyr::if_else(grepl("zeta_pp", process_type), TRUE, FALSE)
+    zeta_constant <- !zeta_pp
+
+    phi_pp <- dplyr::if_else(grepl("phi_pp", process_type), TRUE, FALSE)
+    phi_constant <- !phi_pp
 
     Rmodel <- nimbleModel(
       code = model_code,
@@ -101,6 +114,15 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
       inits = init,
       calculate = calculate
     )
+
+    Cmodel <- compileNimble(Rmodel)
+
+    if(!calculate){
+      calc <- Cmodel$calculate()
+      if(is.infinite(calc) | is.nan(calc) | is.na(calc)){
+        stop(paste0("Model log probability is ", calc))
+      }
+    }
 
     # default MCMC configuration
     mcmcConf <- configureMCMC(Rmodel,
@@ -117,7 +139,6 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
     }
 
     Rmcmc <- buildMCMC(mcmcConf)
-    Cmodel <- compileNimble(Rmodel)
     Cmcmc <- compileNimble(Rmcmc)
     Cmcmc$run(niter = n_iter, nburnin = n_burnin)
     samples <- as.matrix(Cmcmc$mvSamples)
@@ -263,27 +284,15 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
   ))
 }
 
-# function from https://groups.google.com/g/nimble-users/c/i8U54pSGSLs/m/QlCS8hjEBQAJ
-count_by_site <- nimbleFunction(
+sum_properties <- nimbleFunction(
   run = function(
-    group = double(1),
-    z = double(1),
-    ngroup = integer(0)
-  ) {
-
-    M <- length(group)
-    N <- numeric(ngroup)
-
-    for(i in 1:M) {
-      if(z[i] == 1) {
-        N[group[i]] <- N[group[i]] + 1
-      }
-    }
-
-    return(N) # brackets are only necessary in model code, not nimbleFunction
-    returnType(double(1))
+    property = double(1),  # property vector index
+    z = double(1)          # latent property abundance vector
+  ){
+    N <- sum(z[property])
+    return(N)
+    returnType(double(0))
   }
-
 )
 
 
@@ -345,4 +354,79 @@ make_inits_function <- function(inits_dir, constants = NULL, data = NULL){
   return(inits)
 }
 
+
+make_inits_function_dm <- function(inits_dir, process_type, constants, data,
+                                   phi_constant, phi_pp, zeta_constant, zeta_pp){
+
+  # samples <- read_rds("out/test/dm/dm_static/thinnedSamples.rds")
+  # nim <- read_rds("out/test/dm/dm_static/nimbleList.rds")
+  # unit_lookup <- nim$unit_lookup
+  # states_mu <- apply(samples$predict, 2, mean)
+  # N_init <- round(states_mu) |>
+  #   as_tibble() |>
+  #   mutate(property = unit_lookup$property_idx,
+  #          timestep = unit_lookup$timestep) |>
+  #   pivot_wider(names_from = timestep,
+  #               values_from = value) |>
+  #   select(-property) |>
+  #   as.matrix()
+
+  if(is.null(inits_dir)){
+
+    if(phi_constant){
+      phi <- rep(runif(1, 0.85, 0.9), constants$n_pp)
+    } else if(phi_pp){
+      logit_phi_global <- logit(runif(1, 0.9, 0.95))
+      tau_phi <- jitter(3)
+      logit_phi <- rnorm(constants$n_pp, logit_phi_global, 1/sqrt(tau_phi))
+      phi <- ilogit(logit_phi)
+    }
+
+    if(zeta_constant){
+      zeta <- rep(runif(1, 0.1, 0.11), constants$n_pp)
+    } else if(zeta_pp){
+      log_zeta_global <- log(runif(1, 0.1, 0.11))
+      tau_zeta <- jitter(3)
+      log_zeta <- rnorm(constants$n_pp, log_zeta_global, 1/sqrt(tau_zeta))
+      zeta <- exp(log_zeta)
+    }
+
+    p_mu <- rnorm(constants$n_method, -1, 1)
+    N_init <- as.matrix(round((rowSums(data$y_wide, dims = 2, na.rm = TRUE)+400) / 0.2))
+    N <- N_init
+    dm <- matrix(NA, constants$n_property, max(constants$all_pp, na.rm = TRUE))
+    S <- R <- dm
+    for(i in 1:constants$n_property){
+      if((constants$n_timesteps[i]+1) < ncol(N_init)){
+        N_init[i, (constants$n_timesteps[i]+1):ncol(N_init)] <- 0
+      }
+
+      dm[i, constants$all_pp[i, 1]] <- N_init[i, 1]
+      for(t in 2:constants$n_pp_prop[i]){
+        S[i, t] <- rbinom(1, dm[i, constants$all_pp[i, t-1]], phi[constants$all_pp[i, t-1]])
+        R[i, t] <- rpois(1, zeta[constants$all_pp[i, t-1]] * dm[i, constants$all_pp[i, t-1]])
+        dm[i, constants$all_pp[i, t]] <- S[i, t] + R[i, t]
+      }
+    }
+
+    inits <- function(){ list(
+      N = N_init,
+      z1 = rpois(constants$n_property, N_init[,1]),
+      size = runif(constants$n_county, 0.01, 5),
+      log_gamma = rnorm(5),
+      log_rho = rnorm(5),
+      beta_p = matrix(rnorm(constants$n_method*constants$n_beta_p, 0, 0.1), constants$n_method, constants$n_beta_p),
+      p_mu = p_mu,
+      logit_phi = logit(phi[1]),
+      log_zeta = log(zeta[1]),
+      # log_zeta_global = log_zeta_global,
+      # tau_zeta = tau_zeta,
+      # logit_phi_global = logit_phi_global,
+      # tau_phi = tau_phi,
+      S = S,
+      R = R
+    )}
+    return(inits)
+  }
+}
 
