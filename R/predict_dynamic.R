@@ -133,12 +133,14 @@ simulate_nimble_dynamic <- function(mcmc, flags, constants, data, unit_lookup){
       N[i, 1, ] <- rpois(n_mcmc, exp(x[,x_node]))
       yp[i, 1, 1, ] <- rbinom(n_mcmc, N[i, 1, ], p[, H[i, 1, 1]])
       z <- N[i, 1, ] - yp[i, 1, 1, ]
+      # z <- N[i, 1, ] - y[i, 1, 1]
 
       # likelihood for reps after first pass in fist PP
       for(j in 2:n_reps[i, 1]){
 
         yp[i, 1, j, ] <- rbinom(n_mcmc, z, p[, H[i, 1, j]])
         removed <- apply(yp[i, 1, 1:j, ], 2, sum)
+        # removed <- sum(y[i, 1, 1:j])
         z <- N[i, 1, ] - removed
 
       }
@@ -163,7 +165,7 @@ simulate_nimble_dynamic <- function(mcmc, flags, constants, data, unit_lookup){
             log(s[, s_node])
         } else if(process_type == "ricker"){
           mu <-  x[, x_node] +
-            exp(log_r + log(1 - exp(x[, x_node] - log_k[i]))) +
+            exp(log_r + log(1 - exp(pmin(x[, x_node], log_k[i]) - log_k[i]))) +
             log(s[, s_node])
         } else if(process_type == "gompertz"){
           mu <- x[, x_node] +
@@ -182,18 +184,21 @@ simulate_nimble_dynamic <- function(mcmc, flags, constants, data, unit_lookup){
         }
 
         # mu <- pmin(25, mu)
+        if(any(is.na(mu))) message(i, " ", t)
         x_pred <- rnorm(n_mcmc, mu, sigma_proc)
         N[i, t, ] <- rpois(n_mcmc, exp(x_pred))
 
         # likelihood at first rep in > 1 PP
         yp[i, t, 1, ] <- rbinom(n_mcmc, N[i, t, ], p[, H[i, t, 1]])
         z <- N[i, t, ] - yp[i, t, 1, ]
+        # z <- N[i, 1, ] - y[i, 1, 1]
 
         # likelihood for reps after first pass in > 1 PP
         for(j in 2:n_reps[i, t]){
 
           yp[i, t, j, ] <- rbinom(n_mcmc, z, p[, H[i, t, j]])
           removed <- apply(yp[i, t, 1:j, ], 2, sum)
+          # removed <- sum(y[i, 1, 1:j])
           z <- N[i, t, ] - removed
 
         }
