@@ -9,17 +9,39 @@ library(parallel)
 library(nimble)
 library(rgdal)
 
-config_name <- "dennisTaper"
+setwd("C:/Users/John.Foster/OneDrive - USDA/Desktop/fosteR/pigs-statistical/")
+
+config_name <- "dm"
 config_ls <- get(config = config_name)
 list2env(config_ls, .GlobalEnv)
 
-
 data <- read_csv("data/insitu/sample_dynamic.csv")
+
+property_filter <- data |>
+  group_by(agrp_prp_id) |>
+  summarise(n = sum(take)) |>
+  filter(n > 0) |>
+  pull(agrp_prp_id)
+
 sample_units <- data |>
+  filter(agrp_prp_id %in% property_filter) |>
   select(-alws_agrprop_id, -property.size, -two_plus_takes, -n_timesteps, -p, -`...1`) |>
   arrange(agrp_prp_id, timestep_4) |>
   rename(timestep = timestep_4) |>
   mutate(method = if_else(grepl("TRAPS", method), "TRAPS", method))
+
+properties <- sample_units |>
+  select(agrp_prp_id, timestep) |>
+  distinct() |>
+  group_by(agrp_prp_id) |>
+  count() |>
+  filter(n >= 3) |>
+  pull(agrp_prp_id) |>
+  unique() |>
+  sort()
+
+sample_units <- sample_units |>
+  filter(agrp_prp_id %in% properties)
 
 ### need to fill in missing timesteps for each property
 # each spacio-temporal unit
@@ -27,11 +49,8 @@ space_time_units <- sample_units |>
   select(agrp_prp_id, timestep) |>
   distinct()
 
-# all properties
-properties <- space_time_units |>
-  pull(agrp_prp_id) |>
-  unique() |>
-  sort()
+
+
 
 property_info <- sample_units |>
   select(agrp_prp_id, state, cnty_name, st_gsa_state_cd, cnty_gsa_cnty_cd, fips,
@@ -165,12 +184,71 @@ reps_df <- st_order |>
   left_join(properties_cnty) |>
   arrange(agrp_prp_id)
 
+st_order <- st_order |>
+  group_by(agrp_prp_id, timestep) |>
+  mutate(t = 1:n(),
+         ysum = cumsum(take) - take) |>
+  ungroup()
+
+ts_idx <- st_order |>
+  select(agrp_prp_id, timestep) |>
+  distinct() |>
+  group_by(agrp_prp_id) |>
+  mutate(ts_idx = 1:n())
+
+st_order <- left_join(st_order, ts_idx)
+
+n_county_idx <- st_order |>
+  select(agrp_prp_id, fips) |>
+  distinct() |>
+  pull(fips) |>
+  as.factor() |>
+  as.numeric()
+
+p_timestep_idx <- st_order$ts_idx
+y_sum <- st_order$ysum
+
+county_areas_xl <- readxl::read_xls("data/counties/area.xls")
+county_areas <- county_areas_xl |>
+  select(Areaname, STCOU, LND110210D) |>
+  mutate(area_km2 = LND110210D * 2.589) |>
+  rename(fips = STCOU)
+
+# n_county_units
+# sum_prop_area
+# county_area
+# n_prop_cnty
+# n_prop
+#
+# all_county_units <- st_order |>
+#   select(fips, timestep) |>
+#   left_join(county_areas) |>
+#   select(-LND110210D) |>
+#   mutate(m_county_idx = as.numeric(as.factor(fips))) |>
+#   distinct() |>
+#   group_by(fips, timestep) |>
+#   mutate(t = 1:n()) |>
+#   ungroup()
+#
+# n_county_units <- nrow(all_county_units)
+#
+# st_order |>
+#   select(fips, timestep, agrp_prp_id, t)
+#
+# for(i in 1:n_county_units){
+#   sub <- st_order |>
+#     filter(fips == all_county_units$fips[i],
+#            timestep == all_county_units)
+# }
+
+
 max_timesteps <- max(n_timesteps_prop$n)
 max_reps <- max(reps_df$n)
 
-y <- H <- array(NA, dim = c(n_property, max_timesteps, max_reps))
+y_wide <- H <- array(NA, dim = c(n_property, max_timesteps, max_reps))
 n_reps <- timestep <-  matrix(NA, n_property, max_timesteps)
 n_timesteps <- rep(NA, n_property)
+all_pp <- tibble()
 for(i in 1:n_property){
   prop <- properties[i]
   n_timesteps[i] <- n_timesteps_prop |>
@@ -186,24 +264,32 @@ for(i in 1:n_property){
     pivot_wider(names_from = order, values_from = take) |>
     select(-timestep) |>
     as.matrix()
-  y[i, 1:n_timesteps[i], 1:ncol(y_sub)] <- y_sub
+  y_wide[i, 1:n_timesteps[i], 1:ncol(y_sub)] <- y_sub
 
-  p_sub <- prop_sub |>
-    select(-take) |>
-    pivot_wider(names_from = order, values_from = p) |>
-    select(-timestep) |>
-    as.matrix()
-  H[i, 1:n_timesteps[i], 1:ncol(p_sub)] <- p_sub
+  # p_sub <- prop_sub |>
+  #   select(-take) |>
+  #   pivot_wider(names_from = order, values_from = p) |>
+  #   select(-timestep) |>
+  #   as.matrix()
+  # H[i, 1:n_timesteps[i], 1:ncol(p_sub)] <- p_sub
 
   t_sub <- timesteps_df |>
     filter(agrp_prp_id == prop) |>
     pull(timestep)
   timestep[i, 1:length(t_sub)] <- t_sub
 
-  reps <- reps_df |>
-    filter(agrp_prp_id == prop) |>
-    pull(n)
-  n_reps[i, 1:n_timesteps[i]] <- reps
+  reps <- tibble(
+    agrp_prp_id = prop,
+    timestep = min(t_sub):max(t_sub),
+    pp = timestep,
+  ) |>
+    mutate(timestep = timestep - min(timestep) + 1)
+  all_pp <- bind_rows(all_pp, reps)
+
+  # reps <- reps_df |>
+  #   filter(agrp_prp_id == prop) |>
+  #   pull(n)
+  # n_reps[i, 1:n_timesteps[i]] <- reps
 }
 
 for(i in 1:n_property){
@@ -265,14 +351,24 @@ unit_lookup <- st_order |>
   mutate(property_idx = as.numeric(as.factor(agrp_prp_id))) |>
   select(agrp_prp_id, timestep, pp, property_idx)
 
+all_pp_wide <- all_pp |>
+  pivot_wider(names_from = timestep,
+              values_from = pp) |>
+  select(-agrp_prp_id)
+
+n_pp <- apply(all_pp_wide, 1, function(x) max(which(!is.na(x))))
+
 model_flags <- list(
   process_type = process_type,
   spatial = spatial,
-  property_obs_effect = property_obs_effect
+  property_obs_effect = property_obs_effect,
+  likelihood = likelihood
 )
 
 data <- list(
-  y = y,
+  y_wide = y_wide,
+  y_sum = st_order$ysum,
+  y = st_order$take,
   X_p = X_p,
   effort_per = st_order$effort_per,
   log_effort_per = log(st_order$effort_per),
@@ -280,44 +376,54 @@ data <- list(
   log_survey_area_km2 = log(st_order$property_area_km2)
 )
 
+source("R/priors.R")
+phi_prior <- create_surv_prior(logit = TRUE, sd_inflate = 1.2) |>
+  suppressMessages()
+
 constants <- list(
-  H = H,
-  n_reps = n_reps,
-  n_pp = max(timestep, na.rm = TRUE),
+  # n_reps = n_reps,
   n_timesteps = n_timesteps,
-  n_reps = n_reps,
-  county_idx = property_lookup$cnty_idx,
-  log_pi = log(pi),
-  adj = D$adj,
-  weights = D$weights,
-  num = D$num,
+  # n_pp = max(timestep, na.rm = TRUE),
   n_edges = length(D$adj),
   n_county = length(counties),
   n_survey = nrow(st_order),
   n_property = nrow(properties_cnty),
-  m_p = ncol(X_p),
   n_beta_p = ncol(X_p) + 1,
-  first_survey = which(st_order$order == 1),
   n_first_survey = length(which(st_order$order == 1)),
-  not_first_survey = which(st_order$order != 1),
   n_not_first_survey = length(which(st_order$order != 1)),
+  n_trap_snare = length(which(method.vec %in% 4:5)),
+  n_shooting = length(which(method.vec %in% 1:3)),
+  n_units = nrow(unit_lookup),
   n_method = length(levels(st_order$method_factor)),
+  n_pp = max(n_pp),
+  n_pp_prop = n_pp,
+  all_pp = as.matrix(all_pp_wide),
+  # H = H,
+  # reps = st_order$order,
+  p_county_idx = st_order$fips |> as.factor() |> as.numeric(),
+  n_county_idx = n_county_idx,
+  log_pi = log(pi),
+  adj = D$adj,
+  weights = D$weights,
+  num = D$num,
+  m_p = ncol(X_p),
+  first_survey = which(st_order$order == 1),
+  not_first_survey = which(st_order$order != 1),
   p_property_idx = st_order$agrp_prp_id |> as.factor() |> as.numeric(),
+  p_timestep_idx = p_timestep_idx,
   start = st_order$start,
   end = st_order$end,
   timestep = timestep,
   method = method.vec,
   ts_idx = which(method.vec %in% 4:5),
-  n_trap_snare = length(which(method.vec %in% 4:5)),
   shooting_idx = which(method.vec %in% 1:3),
-  n_shooting = length(which(method.vec %in% 1:3)),
-  n_units = nrow(unit_lookup),
   property_x = unit_lookup$property_idx,
   timestep_x = unit_lookup$timestep,
-  log_k = log(property_lookup$property_area_km2) + log(50)
+  phi_prior_mean = phi_prior$surv_mu,
+  phi_prior_sd = phi_prior$surv_sd
 )
 
-dest <- file.path(out_dir, model_dir)
+dest <- file.path(out_dir, model_dir, process_type)
 if(!dir.exists(dest)) dir.create(dest, recursive = TRUE, showWarnings = FALSE)
 
 write_rds(
@@ -327,7 +433,8 @@ write_rds(
     property_lookup = property_lookup,
     unit_lookup = unit_lookup,
     model_flags = model_flags,
-    params_check = params_check
+    params_check = params_check,
+    all_pp = all_pp
   ),
   file = file.path(dest, "nimbleList.rds")
 )
@@ -337,7 +444,16 @@ source(model_file)
 source("R/functions_nimble.R")
 
 # inits <- make_inits_function(NULL, constants = constants, data = data)
-inits <- make_inits_function(file.path(out_dir, inits_dir))
+# inits <- make_inits_function(file.path(out_dir, inits_dir))
+
+zeta_pp <- if_else(grepl("zeta_pp", process_type), TRUE, FALSE)
+zeta_constant <- !zeta_pp
+
+phi_pp <- if_else(grepl("phi_pp", process_type), TRUE, FALSE)
+phi_constant <- !phi_pp
+
+inits <- make_inits_function_dm(NULL, process_type, constants, data,
+                                phi_constant, phi_pp, zeta_constant, zeta_pp)
 
 # custom_samplers <- tibble(
 #   node = c("p_mu"),
@@ -369,8 +485,12 @@ custom_samplers <- NULL
 #
 # }
 
+
 if(run_parallel){
-  message("Build cluster")
+  source(model_file)
+  # source("R/functions_nimble.R")
+
+  message("==== Build cluster ===")
   cl <- makeCluster(3)
   system.time(
     samples <- run_nimble_parallel(
@@ -384,6 +504,7 @@ if(run_parallel){
       params_check = params_check,
       custom_samplers = NULL,
       model_flags = model_flags,
+      calculate = FALSE,
       state.col = "xn",
       max_iter = 500000,
       dest = dest,
@@ -411,31 +532,36 @@ if(run_parallel){
   # save_iter = TRUE
   # effective_size = 5000
   # max_psrf = 500
-  # calculate = TRUE
-  # use_conjugacy = FALSE
+  # calculate = FALSE
+  # use_conjugacy = TRUE
   # dest = dest
   # stopCluster(cl)
 
 } else {
 
-  exponential <- if_else(process_type == "exponential", TRUE, FALSE)
-  ricker <- if_else(process_type == "ricker", TRUE, FALSE)
-  gompertz <- if_else(process_type == "gompertz", TRUE, FALSE)
-  jamiesonBrooks <- if_else(process_type == "jamiesonBrooks", TRUE, FALSE)
-  dennisTaper <- if_else(process_type == "dennisTaper", TRUE, FALSE)
+  likelihood_nb <- if_else(likelihood == "nb", TRUE, FALSE)
+  likelihood_binom <- ifelse(likelihood_nb, FALSE, TRUE)
 
+  inits <- make_inits_function_dm(NULL, process_type, constants, data,
+                                  phi_constant, phi_pp, zeta_constant, zeta_pp)
+  i_test <- inits()
+
+  source(model_file)
   Rmodel <- nimbleModel(
     code = modelCode,
     constants = constants,
-    inits = inits(),
-    data = data
+    data = data,
+    inits = i_test,
+    calculate = FALSE
   )
+  Cmodel <- compileNimble(Rmodel)
+  Cmodel$calculate()
 
   # check initialization
-  Rmodel$initializeInfo()
+  Cmodel$initializeInfo()
 
   # default MCMC configuration
-  mcmcConf <- configureMCMC(Rmodel, useConjugacy = TRUE, monitors = c("xn", params_check))
+  mcmcConf <- configureMCMC(Cmodel, useConjugacy = TRUE)#, monitors = c("xn", params_check))
 
   if(!is.null(custom_samplers)){
     for(i in seq_len(nrow(custom_samplers))){
@@ -447,18 +573,18 @@ if(run_parallel){
   }
 
   # these print statements will not display when running in parallel
-  mcmcConf$printMonitors()
-  mcmcConf$printSamplers(byType = TRUE)
-
+  # mcmcConf$printMonitors()
+  # mcmcConf$printSamplers(byType = TRUE)
   Rmcmc <- buildMCMC(mcmcConf)
-  Cmodel <- compileNimble(Rmodel)
   Cmcmc <- compileNimble(Rmcmc)
-  samples <- runMCMC(Cmcmc, nchains = 1, niter = 200)
+  samples <- runMCMC(Cmcmc, nchains = 1, niter = 5)
 
   ss  <- as.matrix(samples)
   # plot(exp(ss[, "log_r_mu"]), type="l")
   # plot(exp(ss[, "xn[211]"]), type="l")
   # plot(exp(ss[, "log_rho[4]"]), type="l")
+  # plot(exp(ss[, "log_zeta_global"]), type="l")
+  # plot(ilogit(ss[, "logit_phi"]), type="l")
   # plot(exp(ss[, "beta_r"]), type="l")
 }
 
