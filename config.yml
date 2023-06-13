@@ -1,11 +1,9 @@
 default:
+  out_dir: "out/test"
   run_parallel: TRUE
   n_iter: 50000
   init_dir: NULL
-  params_check : !expr c("beta_p", "log_rho", "log_gamma", "p_unique", "log_r_mu", "tau_proc")
-  spatial: FALSE
-  property_obs_effect: FALSE
-  out_dir: "out/test"
+  likelihood: "nb"
   model_file: "R/nimble_dynamic.R"
 
 exponential:
@@ -33,4 +31,24 @@ dennisTaper:
   model_dir: "dennisTaper"
   process_type: "dennisTaper"
 
+dm:
+  out_dir: "out/test"
+  model_dir: "dm2"
+  process_type: "static"
+  inits_dir: "dm"
+  params_check : !expr c("beta_p", "log_rho", "log_gamma", "p_unique", "log_zeta", "logit_phi", "size")
+  spatial: FALSE
+  property_obs_effect: FALSE
+  model_file: "R/nimble_dm_2.R"
 
+dm_zeta_pp:
+  inherits: dm
+  process_type: "zeta_pp"
+  params_check : !expr c("beta_p", "log_rho", "log_gamma", "p_unique", "log_zeta",
+    "log_zeta_global", "logit_phi", "size", "tau_zeta")
+
+dm_phi_pp:
+  inherits: dm
+  process_type: "phi_pp"
+  params_check : !expr c("beta_p", "log_rho", "log_gamma", "p_unique", "log_zeta",
+    "logit_phi_global", "logit_phi", "size", "tau_phi")
