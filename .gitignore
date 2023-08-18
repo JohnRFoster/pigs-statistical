@@ -40,3 +40,6 @@ vignettes/*.pdf
 
 # model output
 out/
+
+# plots
+plots/
