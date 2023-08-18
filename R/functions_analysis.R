@@ -101,33 +101,6 @@ thin_samples <- function(path, start, override_trace = FALSE, ...){
     message("  done")
   }
 
-
-  # if(plot){
-  #
-  #   psub <- params
-  #
-  #   if(any(grepl("size", colnames(as.matrix(params))))){
-  #     psub <- split_out(psub, "size")
-  #     # plot_sub(psub$predict, file.path(path, "traceplots_size.pdf"))
-  #     psub <- psub$params
-  #   }
-  #
-  #   if(any(grepl("log_zeta_global", colnames(as.matrix(params))))){
-  #     psub <- split_out(psub, "log_zeta")
-  #     plot_sub(psub$predict, file.path(path, "traceplots_log_zeta.pdf"))
-  #     psub <- psub$params
-  #   }
-  #
-  #   if(any(grepl("logit_phi_global", colnames(as.matrix(params))))){
-  #     psub <- split_out(psub, "log_phi")
-  #     plot_sub(psub$predict, file.path(path, "traceplots_logit_phi.pdf"))
-  #     psub <- psub$params
-  #   }
-  #
-  #   plot_sub(psub, file.path(path, "traceplots.pdf"))
-  #
-  # }
-
   converge <- convergence_check(params, params_check)
   burnin <- converge$burnin
 
