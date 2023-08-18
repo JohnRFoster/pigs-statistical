@@ -1,17 +1,87 @@
 
+#'@description Calculate the potential search area from posterior samples when traps or snares are used
+#'@param log_rho vector of mcmc samples for rho (log scale)
+#'@param log_gamma vector of mcmc samples for gamma (log scale)
+#'@param p_unique vector of mcmc samples for p
+#'@param effort_per the effort per trap/snare
+#'@param n_trap_m1 the number of traps/snares used minus 1
 
-
-
-calc_log_potential_area_trap_snare <- function(log_rho, log_gamma, p_unique, effort_per, n_trap_m1){
+trap_snare_lpa <- function(log_rho, log_gamma, p_unique, effort_per, n_trap_m1){
   log(pi) +
     (2 * (log_rho + log(effort_per) -
             log(exp(log_gamma) + effort_per))) +
     log(1 + (p_unique * n_trap_m1))
 }
-calc_log_potential_area_shooting <- function(log_rho, p_unique, effort_per, n_trap_m1){
+
+#'@description Calculate the potential search area from posterior samples when shooting methods (fixed wing, helicopter, hunting) are used
+#'@param log_rho vector of mcmc samples for rho (log scale)
+#'@param p_unique vector of mcmc samples for p
+#'@param effort_per the effort per trap/snare
+#'@param n_trap_m1 the number of traps/snares used minus 1
+
+shooting_lpa <- function(log_rho, p_unique, effort_per, n_trap_m1){
   log_rho +
     log(effort_per) -
     log(1 + (p_unique * n_trap_m1))
+}
+
+#'@description Calculate the potential search area from posterior samples for a vector of methods (used in forecasting code)
+#'@param log_rho vector of mcmc samples for rho (log scale), iterations (rows) by method (columns)
+#'@param log_gamma vector of mcmc samples for gamma (log scale), iterations (rows) by method (columns)
+#'@param p_unique vector of mcmc samples for p, iterations (rows) by method (columns)
+#'@param effort_per the effort per unit
+#'@param n_trap_m1 the number of units used minus 1
+
+calc_log_potential_area <- function(method, log_rho, log_gamma, p_unique, effort_per, n_trap_m1){
+  n_mcmc <- length(log_rho)
+  n_reps <- length(method)
+  log_potential_area <- matrix(NA, n_mcmc, n_reps)
+  for(j in seq_along(method)){
+    lr <- log_rho[,method[j]]
+    p <- p_unique[,method[j]]
+    ep <- effort_per[j]
+    tcm1 <- n_trap_m1[j]
+    if(method[j] == 4 | method[j] == 5){
+      lg <- log_gamma[,method[j]-3]
+      log_potential_area[,j] <- trap_snare_lpa(lr, lg, p, ep, tcm1)
+    } else {
+      log_potential_area[,j] <- shooting_lpa(lr, p, ep, tcm1)
+    }
+  }
+  return(log_potential_area)
+}
+
+#'@description calculate the capture probability for a removal event
+#'@param X matrix of county-level land cover covariates, first column is 1's for an intercept term
+#'@param beta vector of coeffiencents
+#'@param log_potential_area matrix of potential search area, iterations (rows) by replicate (columns)
+#'@param area_property scalar value of the area (mk^2) of the property
+
+calc_p <- function(X, beta, log_potential_area, area_property){
+  n_mcmc <- nrow(beta_p)
+  n_reps <- ncol(log_potential_area)
+  p <- matrix(NA, n_mcmc, n_reps)
+  for(mc in seq_len(n_mcmc)){
+    log_theta <- numeric(n_reps)
+    for(j in seq_len(n_reps)){
+
+      # base probability of capture given an individual is the first survey
+      log_theta[j] <- log(ilogit(inprod(X, beta[mc,]))) +
+        pmin(0, log_potential_area[mc, j] - log(area_property))
+
+      # the probability an individual is captured on the first survey
+      if(j == 1){
+        p[mc, j] <- exp(log_theta[j])
+      } else {
+        # the probability an individual is captured after the first survey
+        for(k in 2:n_reps){
+          p[mc, j] <- exp(log_theta[1] +
+                            sum(log(1 - exp(log_theta[1:(j-1)]))))
+        }
+      }
+    }
+  }
+  return(p)
 }
 
 
@@ -53,7 +123,7 @@ data_posteriors <- function(samples, constants, data){
 
     for(i in 1:n_survey){
       if(method[i] == 4 | method[i] == 5){
-        log_potential_area[,i] <- calc_log_potential_area_trap_snare(
+        log_potential_area[,i] <- trap_snare_lpa(
           log_rho = log_rho[,method[i]],
           log_gamma = log_gamma[,method[i]-3],
           p_unique = p_unique[,method[i]],
@@ -61,7 +131,7 @@ data_posteriors <- function(samples, constants, data){
           n_trap_m1 = n_trap_m1[i]
         )
       } else {
-        log_potential_area[,i] <- calc_log_potential_area_shooting(
+        log_potential_area[,i] <- shooting_lpa(
           log_rho = log_rho[,method[i]],
           p_unique = p_unique[,method[i]],
           effort_per = effort_per[i],

@@ -1,11 +1,17 @@
 
-# n_fx <- 3
-#
-# expand_grid(
-#   R = "R",
-#   N = "N"
-# )
-#
+n_fx <- 3
+n_reps <- 3
+
+scenarios <- data.frame(t1 = c("N", "R"))
+if(n_fx > 1){
+  for(i in 2:n_fx){
+    scenarios <- cbind(scenarios, c("N", "R"))
+  }
+  colnames(scenarios) <- paste0("t", 1:n_fx)
+  scenarios <- expand.grid(scenarios)
+}
+scenarios <- t(scenarios)
+
 rep_num <- 1 # starting with 13 there are 50 properties
 out_dir <- "out/simulation"
 model_dir <- "DM_recruitData_varyingEffort"
@@ -69,7 +75,16 @@ X <- unique(X_p)
 N_predict <- tibble()
 Y_predict <- tibble()
 
-for(m in 1:n_mcmc){
+get_e <- function(e){
+  lapply(m, function(i){
+    E |> filter(method == i)
+  }) |>
+    bind_rows() |>
+    pull(e)
+}
+
+for(s in 1:nrow(scenarios)){
+  scenario_name <- as.vector(scenarios[,s])
   for(i in 1:n_property){
 
     prop <- property_df |>
@@ -89,97 +104,87 @@ for(m in 1:n_mcmc){
     take_property <- take |>
       filter(property == i)
 
-    m_freq <- table(take_property$method)/length(take_property$method)
-
     E <- take_property |>
       group_by(method, area_property) |>
       summarise(effort_per = mean(effort_per),
-                trap_count = mean(trap_count))
+                trap_count = mean(trap_count)) |>
+      ungroup()
 
     c <- take_property$county[1]
 
     for(t in start_pp:end_pp){
+      for(fx in 1:n_fx){
 
-      # need frequencies of each sample method for each data set (or property?? or county??)
-      # can use these frequencies to simulate removal events for each MCMC sample
-      # for population abundance through time all we need is the total removed
 
-      phi <- ilogit(rnorm(n_mcmc, mu_phi, sigma_phi))
-      S <- rbinom(n_mcmc, N, phi)
-      R <- rpois(n_mcmc, N * zeta)
-      N <- S + R
+        # do we remove pigs?
+        if(scenario_name[fx] == "R"){
 
-      # storage
-      N_predict <- bind_rows(N_predict,
-                             tibble(
-                               property = i,
-                               PPNum = t,
-                               S = S,
-                               R = R,
-                               N = N
-                             ))
+          # removal methods based on frequency of use in a given property
+          m <- sample(take_property$method, n_reps, replace = TRUE)
 
-      # removals
-      m <- sample.int(5, n_reps, prob = m_freq)
+          # extract effort attributes from property
+          ep <- get_e("effort_per")
+          tc_m1 <- get_e("trap_count") - 1
 
-      log_potential_area <- matrix(NA, n_mcmc, n_reps)
-      for(j in seq_len(n_reps)){
-        if(m[j] == 4 | m[j] == 5){
-          log_potential_area[,j] <- calc_log_potential_area_trap_snare(
-            log_rho = log_rho[,m[j]],
-            log_gamma = log_gamma[,m[j]-3],
-            p_unique = p_unique[,m[j]],
-            effort_per = E$effort_per[m[j]],
-            n_trap_m1 = E$trap_count[m[j]] - 1
+          # the search area given method and effort
+          log_potential_area <- calc_log_potential_area(
+            method = m,
+            log_rho = log_rho,
+            log_gamma = log_gamma,
+            p_unique = p_unique,
+            effort_per = ep,
+            n_trap_m1 = tc_m1
           )
-        } else {
-          log_potential_area[,j] <- calc_log_potential_area_shooting(
-            log_rho = log_rho[,m[j]],
-            p_unique = p_unique[,m[j]],
-            effort_per = E$effort_per[m[j]],
-            n_trap_m1 = E$trap_count[m[j]] - 1
+
+          # probability of capture for each pass
+          p <- calc_p(
+            X = X[c,],
+            beta = beta_p,
+            log_potential_area = log_potential_area,
+            area_property = E$area_property[1]
           )
-        }
-      }
 
-      p <- matrix(NA, n_mcmc, n_reps)
-      for(mc in seq_len(n_mcmc)){
-        log_theta <- numeric(n_reps)
-        for(j in seq_len(n_reps)){
-
-          # base probability of capture given an individual is the first survey
-          log_theta[j] <- log(ilogit(inprod(X_p[c,], beta_p[mc,]))) +
-            pmin(0, log_potential_area[mc, j] - log(E$area_property[m[j]]))
-
-          # the probability an individual is captured on the first survey
-          p[mc, j] <- exp(log_theta[1])
-
-          # the probability an individual is captured after the first survey
-          for(k in 2:n_reps){
-            p[mc, k] <- exp(log_theta[1] +
-                              sum(log(1 - exp(log_theta[1:(k-1)]))))
+          # remove
+          y <- matrix(NA, n_mcmc, n_reps)
+          for(j in seq_len(n_reps)){
+            y[,j] <- rpois(n_mcmc, N * p[,j])
+            y_rep <- tibble(
+              y = y[,j],
+              property = i,
+              PPNum = t,
+              method = m[j],
+              effort_per = E$effort_per[m[j]],
+              trap_count = E$trap_count[m[j]],
+              rep = j
+            )
+            Y_predict <- bind_rows(Y_predict, y_rep)
           }
+
+          N <- N - rowSums(y)
         }
-      }
 
-      y <- matrix(NA, n_mcmc, n_reps)
-      for(j in seq_len(n_reps)){
-        y[,j] <- rpois(n_mcmc, N * p[,j])
-        Y_predict <- bind_rows(
-          Y_predict,
-          tibble(
-            y = y[,j],
-            property = i,
-            PPNum = t,
-            method = m[j],
-            effort_per = E$effort_per[m[j]],
-            trap_count = E$trap_count[m[j]],
-            rep = j
-          )
-        )
-      }
+        phi <- ilogit(rnorm(n_mcmc, mu_phi, sigma_phi))
+        S <- rbinom(n_mcmc, N, phi)
+        R <- rpois(n_mcmc, N * zeta)
+        N <- S + R
 
-      N <- N - rowSums(y)
+        # storage
+        N_predict <- bind_rows(N_predict,
+                               tibble(
+                                 property = i,
+                                 start_pp = t,
+                                 PPNum = t+fx,
+                                 horizon = fx,
+                                 removal = scenario_name[fx],
+                                 S = S,
+                                 R = R,
+                                 N = N
+                               ))
+      } # fx
+
+
+
+
 
 
 
