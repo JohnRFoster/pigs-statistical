@@ -1,3 +1,69 @@
+# figure out if we need to keep sampling
+continue_mcmc <- function(mcmc, nodes, effective_size, max_psrf){
+  require(coda)
+  # check convergence and effective sample size on specified node
+  subset_check_mcmc <- function(node){
+    s <- mcmc[,grep(node, colnames(mcmc[[1]]), value = TRUE, fixed = TRUE)]
+    df <- data.frame(
+      psrf = gelman.diag(s, multivariate = FALSE)$psrf[,2], # checking the upper CI
+      effective_samples = effectiveSize(s)
+    )
+    if(nrow(df) == 1) rownames(df) <- node
+    return(df)
+  }
+
+  message("Checking convergence and sample size")
+  checks <- map_dfr(lapply(nodes, subset_check_mcmc), as.data.frame)
+  converged <- all(checks$psrf < 1.1)
+  enough_samples <- all(checks$effective_samples >= effective_size)
+  funky <- any(is.nan(checks$psrf)) | max(checks$psrf) > max_psrf
+
+  message('Convergence = ', converged)
+  message('Enough effective samples = ', enough_samples)
+  message('Mixing = ', !funky)
+
+  done <- converged & enough_samples
+  if(done) message("MCMC complete!")
+
+  # TODO determine burnin and effective sample size POST burnin
+
+  if(funky){
+    message("Something is wrong with the mcmc!")
+    done <- FALSE
+  }
+
+  if(!done | funky) print(checks)
+
+  return(list(
+    done = done,
+    checks = checks
+  ))
+}
+
+subset_check_burnin <- function(node, plot = FALSE){
+  s <- mcmc[,grep(node, colnames(mcmc[[1]]), value = TRUE, fixed = TRUE)]
+  if(plot){
+    GBR <- gelman.plot(s)
+  } else {
+    ff <- tempfile()
+    png(filename = ff)
+    GBR <- gelman.plot(s)
+    dev.off()
+    unlink(ff)
+  }
+  shrink <- GBR$shrink[, , 2]
+  if(all(shrink < 1.1)){
+    burnin <- 1
+  } else {
+    if(is.null(dim(s$chain1))){
+      burnin <- GBR$last.iter[tail(which(shrink > 1.1), 1) + 1]
+    } else {
+      burnin <- GBR$last.iter[tail(which(apply(shrink > 1.1, 1, any)), 1) + 1]
+    }
+  }
+  return(burnin)
+}
+
 # need to combine previous sample chunks if resetMV = TRUE
 get_mcmc_chunks <- function(path, start = 1, stop = NULL){
   out.files <- list.files(path)
@@ -21,7 +87,7 @@ get_mcmc_chunks <- function(path, start = 1, stop = NULL){
 }
 
 split_out <- function(mcmc_out, state.col){
-
+  require(coda)
   mat2mcmc_list <- function(w) {
     temp <- list()
     chain.col <- which(colnames(w) == "CHAIN")
@@ -44,255 +110,72 @@ split_out <- function(mcmc_out, state.col){
 
 
 
-run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
-                                model_inits, n_iter, params_check, state.col,
-                                model_flags, custom_samplers = NULL,
-                                effective_size = 5000, n_burnin = NULL,
-                                max_iter = NULL, max_psrf = 100,
-                                calculate = TRUE, use_conjugacy = TRUE,
-                                resetMV = FALSE,
-                                save_iter = FALSE, dest = NULL){
-  library(nimble)
-  library(coda)
-
-  if(is.null(n_burnin)) n_burnin <- round(n_iter / 4)
-  if(is.null(max_iter)) max_iter <- n_iter * 100
-
-  export <- c(
-    "model_code",
-    "model_data",
-    "model_constants",
-    "n_iter",
-    "n_burnin",
-    "calculate",
-    "resetMV",
-    "use_conjugacy",
-    "params_check",
-    "custom_samplers",
-    "model_flags"
-  )
-
-  clusterExport(cl, export, envir = environment())
-
-  for(i in seq_along(cl)){
-    set.seed(i)
-    init <- model_inits()
-    clusterExport(cl[i], "init", envir = environment())
-  }
-
-  message("Compiling model and initial parallel sampling...")
-  c <- 1
-  start <- Sys.time()
-  out <- clusterEvalQ(cl, {
-    library(nimble)
-    library(coda)
-    # library(dplyr)
-
-    list2env(model_flags, .GlobalEnv)
-    likelihood_nb <- dplyr::if_else(likelihood == "nb", TRUE, FALSE)
-    likelihood_binom <- dplyr::if_else(likelihood_nb, FALSE, TRUE)
-
-    exponential <- dplyr::if_else(process_type == "exponential", TRUE, FALSE)
-    ricker <- dplyr::if_else(process_type == "ricker", TRUE, FALSE)
-    gompertz <- dplyr::if_else(process_type == "gompertz", TRUE, FALSE)
-    jamiesonBrooks <- dplyr::if_else(process_type == "jamiesonBrooks", TRUE, FALSE)
-    dennisTaper <- dplyr::if_else(process_type == "dennisTaper", TRUE, FALSE)
-
-    zeta_constant <- dplyr::if_else(process_type == "static", TRUE, FALSE)
-    zeta_pp <- dplyr::if_else(process_type == "zeta_pp", TRUE, FALSE)
-
-    zeta_pp <- dplyr::if_else(grepl("zeta_pp", process_type), TRUE, FALSE)
-    zeta_constant <- !zeta_pp
-
-    phi_pp <- dplyr::if_else(grepl("phi_pp", process_type), TRUE, FALSE)
-    phi_constant <- !phi_pp
-
-    Rmodel <- nimbleModel(
-      code = model_code,
-      constants = model_constants,
-      data = model_data,
-      inits = init,
-      calculate = calculate
-    )
-
-    Cmodel <- compileNimble(Rmodel)
-
-    if(!calculate){
-      calc <- Cmodel$calculate()
-      if(is.infinite(calc) | is.nan(calc) | is.na(calc)){
-        stop(paste0("Model log probability is ", calc))
-      }
-    }
-
-    # default MCMC configuration
-    mcmcConf <- configureMCMC(Rmodel,
-                              useConjugacy = use_conjugacy,
-                              monitors = c("xn", params_check))
-
-    if(!is.null(custom_samplers)){
-      for(i in seq_len(nrow(custom_samplers))){
-        node <- custom_samplers$node[i]
-        type <- custom_samplers$type[i]
-        mcmcConf$removeSampler(node)
-        mcmcConf$addSampler(node, type)
-      }
-    }
-
-    Rmcmc <- buildMCMC(mcmcConf)
-    Cmcmc <- compileNimble(Rmcmc)
-    Cmcmc$run(niter = n_iter, nburnin = n_burnin)
-    samples <- as.matrix(Cmcmc$mvSamples)
-    return(samples)
-  })
-  message(n_iter, " iterations complete:")
-  print(Sys.time() - start)
 
 
-  # convert samples to mcmc list to check for convergence
-  mcmc <- as.mcmc.list(lapply(out, as.mcmc))
+tau_2_sigma <- function(tau){
+  1/sqrt(tau)
+}
 
-  # figure out if we need to keep sampling
-  continue_mcmc <- function(nodes){
+sigma_2_tau <- function(sigma){
+  1/sigam^2
+}
 
-    # check convergence and effective sample size on specified node
-    subset_check_mcmc <- function(node){
-      s <- mcmc[,grep(node, colnames(mcmc[[1]]), value = TRUE, fixed = TRUE)]
-      df <- data.frame(
-        psrf = gelman.diag(s, multivariate = FALSE)$psrf[,2], # checking the upper CI
-        effective_samples = effectiveSize(s)
-      )
-      if(nrow(df) == 1) rownames(df) <- node
-      return(df)
-    }
+sigma_2_var <- function(sigma){
+  sigma^2
+}
 
-    message("Checking convergence and sample size")
-    checks <- map_dfr(lapply(nodes, subset_check_mcmc), as.data.frame)
-    converged <- all(checks$psrf < 1.1)
-    enough_samples <- all(checks$effective_samples >= effective_size)
-    funky <- any(is.nan(checks$psrf)) | max(checks$psrf) > max_psrf
+var_2_sigma <- function(var){
+  sqrt(var)
+}
 
-    message('Convergence = ', converged)
-    message('Enough effective samples = ', enough_samples)
-    message('Mixing = ', !funky)
+var_2_tau <- function(var){
+  1/var
+}
 
-    done <- converged & enough_samples
-    if(done) message("MCMC complete!")
-
-    # TODO determine burnin and effective sample size POST burnin
-
-    if(funky){
-      message("Something is wrong with the mcmc!")
-      done <- NA
-    }
-
-    if(!done | funky) print(checks)
-
-    return(list(
-      done = done,
-      checks = checks
-    ))
-  }
-
-  diagnostic <- continue_mcmc(params_check)
-  done <- diagnostic$done
-
-  # if convergence is reached and we have enough samples, or something is wrong,
-  # exit and return samples
-  if(done | is.na(done)){
-    mcmc_split <- split_out(mcmc, state.col)
-    return(list(
-      params = mcmc_split$params,
-      predict = mcmc_split$predict,
-      diagnostic = diagnostic$checks
-    ))
-  }
-
-  save_samples <- function(save_iter, resetMV, state.col){
-
-    mcmc_split <- split_out(mcmc, state.col)
-
-    if(save_iter){
-      out_rds <- list(
-        params = mcmc_split$params,
-        predict = mcmc_split$predict,
-        diagnostic = diagnostic$checks
-      )
-      f <- "mcmcSamples.rds"
-      if(resetMV){
-        if(c < 10) c <- paste0("0", c)
-        f <- paste0(c, "_", f)
-      }
-      message("  Writing samples")
-      if(!dir.exists(dest)){
-        dir.create(dest, recursive = TRUE, showWarnings = FALSE)
-      }
-      write_rds(out_rds, file.path(dest, f))
-    }
-  }
-
-  save_samples(save_iter, resetMV, state.col)
-
-  # if the script has made it to this point we need to keep sampling
-  continue <- TRUE
-
-  while(continue){
-
-    # run mcmc
-    c <- c + 1
-    message("Parallel sampling ", c)
-    start2 <- Sys.time()
-    out2 <- clusterEvalQ(cl, {
-      Cmcmc$run(n_iter, reset = FALSE, resetMV = resetMV)
-      return(as.mcmc(as.matrix(Cmcmc$mvSamples)))
-    })
-    message(n_iter, " iterations complete:")
-    print(Sys.time() - start2)
-
-    mcmc_c <- as.mcmc.list(lapply(out2, as.mcmc))
-    mcmc <- mcmc_c
-
-    # save output if requested
-    save_samples(save_iter, resetMV, state.col)
-
-    if(resetMV) mcmc1 <- get_mcmc_chunks(dest)$params
-
-    total_iter <- nrow(mcmc1[[1]])
-    message("Total run time for ", total_iter, " iterations:")
-    print(Sys.time() - start)
-
-    diagnostic <- continue_mcmc(params_check)
-    # save_samples(save_iter, resetMV)
-
-    done <- diagnostic$done
-    # if(done | is.na(done)){
-    #   mcmc_split <- split_out(mcmc, state.col)
-    #   return(list(
-    #     params = mcmc_split$params,
-    #     predict = mcmc_split$predict,
-    #     diagnostic = diagnostic$checks
-    #   ))
-    # }
-
-    continue_samp <- total_iter < max_iter
-    continue <- if_else(continue_samp, !done, FALSE)
-
-  }
-  message("Maximum iterations reached. Returning current samples.")
-  return(list(
-    samples = as.mcmc.list(lapply(out2, as.mcmc)),
-    diagnostic = diagnostic$checks
-  ))
+tau_2_var <- function(tau){
+  1/tau
 }
 
 sum_properties <- nimbleFunction(
+
   run = function(
     property = double(1),  # property vector index
-    z = double(1)          # latent property abundance vector
+    z = double(1)          # latent abundance vector
   ){
     N <- sum(z[property])
     return(N)
     returnType(double(0))
-  }
+  },
+  buildDerivs = TRUE
+)
+
+calc_log_potential_area <- nimbleFunction(
+  run = function(
+      log_rho = double(1),
+      log_gamma = double(1),
+      p_unique = double(1),
+      log_effort_per = double(0),
+      effort_per = double(0),
+      n_trap_m1 = double(0),
+      log_pi = double(0),
+      method = double(0)
+  ){
+    m <- method
+    if(m == 4 | m == 5){
+      log_potential_area <- log_pi +
+        (2 * (log_rho[m] + log_effort_per -
+                log(exp(log_gamma[m-3]) + effort_per))) +
+        log(1 + (p_unique[m] * n_trap_m1))
+    } else {
+      log_potential_area <- log_rho[m] +
+        log_effort_per -
+        # log(exp(log_gamma[m]) + effort_per) +
+        log(1 + (p_unique[m] * n_trap_m1))
+    }
+    return(log_potential_area)
+    returnType(double(0))
+  },
+  buildDerivs = TRUE
 )
 
 
@@ -355,8 +238,7 @@ make_inits_function <- function(inits_dir, constants = NULL, data = NULL){
 }
 
 
-make_inits_function_dm <- function(inits_dir, process_type, constants, data,
-                                   phi_constant, phi_pp, zeta_constant, zeta_pp){
+make_inits_function_dm <- function(inits_dir, constants, data, demographic_stochasticity){
 
   # samples <- read_rds("out/test/dm/dm_static/thinnedSamples.rds")
   # nim <- read_rds("out/test/dm/dm_static/nimbleList.rds")
@@ -373,56 +255,58 @@ make_inits_function_dm <- function(inits_dir, process_type, constants, data,
 
   if(is.null(inits_dir)){
 
-    if(phi_constant){
-      phi <- rep(runif(1, 0.85, 0.9), constants$n_pp)
-    } else if(phi_pp){
-      logit_phi_global <- logit(runif(1, 0.9, 0.95))
-      tau_phi <- jitter(3)
-      logit_phi <- rnorm(constants$n_pp, logit_phi_global, 1/sqrt(tau_phi))
-      phi <- ilogit(logit_phi)
-    }
+    logit_mean_phi <- runif(1, 1.5, 2)
+    sigma_phi <- runif(1, 0.5, 0.75)
 
-    if(zeta_constant){
-      zeta <- rep(runif(1, 0.1, 0.11), constants$n_pp)
-    } else if(zeta_pp){
-      log_zeta_global <- log(runif(1, 0.1, 0.11))
-      tau_zeta <- jitter(3)
-      log_zeta <- rnorm(constants$n_pp, log_zeta_global, 1/sqrt(tau_zeta))
-      zeta <- exp(log_zeta)
-    }
+    mean_lpy <- 1
+    mean_ls <- round(runif(1, 3.5, 6.4))
+    zeta <- rep(mean_lpy / 365 * constants$pp_len * mean_ls, constants$n_pp)
 
-    p_mu <- rnorm(constants$n_method, -1, 1)
-    N_init <- as.matrix(round((rowSums(data$y_wide, dims = 2, na.rm = TRUE)+400) / 0.2))
-    N <- N_init
+    p_mu <- jitter(nimble::logit(c(0.6, 0.4, 0.5, 0.3, 0.25)))
     dm <- matrix(NA, constants$n_property, max(constants$all_pp, na.rm = TRUE))
+    phi_track <- 0
     S <- R <- dm
     for(i in 1:constants$n_property){
-      if((constants$n_timesteps[i]+1) < ncol(N_init)){
-        N_init[i, (constants$n_timesteps[i]+1):ncol(N_init)] <- 0
-      }
-
-      dm[i, constants$all_pp[i, 1]] <- N_init[i, 1]
+      dm[i, constants$all_pp[i, 1]] <- constants$N_init[i] + rpois(1, 200)
       for(t in 2:constants$n_pp_prop[i]){
-        S[i, t] <- rbinom(1, dm[i, constants$all_pp[i, t-1]], phi[constants$all_pp[i, t-1]])
-        R[i, t] <- rpois(1, zeta[constants$all_pp[i, t-1]] * dm[i, constants$all_pp[i, t-1]])
-        dm[i, constants$all_pp[i, t]] <- S[i, t] + R[i, t]
+        phi <- nimble::ilogit(rnorm(1, logit_mean_phi, sigma_phi))
+        phi_track <- c(phi_track, phi)
+        n_avail <- max(0, dm[i, constants$all_pp[i, t-1]] - data$rem[i, t-1])
+        if(is.na(n_avail)) print(t)
+        if(demographic_stochasticity){
+          S[i, t-1] <- rbinom(1, n_avail, phi)
+          R[i, t-1] <- rpois(1, zeta[constants$all_pp[i, t-1]] * n_avail/2)
+        } else {
+          S[i, t-1] <- round(n_avail * phi)
+          R[i, t-1] <- round(zeta[constants$all_pp[i, t-1]] * n_avail/2)
+        }
+        dm[i, constants$all_pp[i, t]] <- S[i, t-1] + R[i, t-1]
       }
     }
 
+    N <- matrix(NA, constants$n_property, constants$n_pp)
+    for(i in 1:constants$n_property){
+      for(t in 1:constants$n_timesteps[i]){ # loop through sampled PP only
+        N[i, constants$PPNum[i, t]] <- dm[i, constants$PPNum[i, t]]
+      }
+    }
+    # N[N == 0] <- 1
     inits <- function(){ list(
-      N = N_init,
-      z1 = rpois(constants$n_property, N_init[,1]),
-      size = runif(constants$n_county, 0.01, 5),
-      log_gamma = rnorm(5),
-      log_rho = rnorm(5),
-      beta_p = matrix(rnorm(constants$n_method*constants$n_beta_p, 0, 0.1), constants$n_method, constants$n_beta_p),
+      N = N,
+      log_lambda_1 = log(apply(N, 1, function(x) x[min(which(!is.na(x)))])),
+      log_gamma = log(runif(2, 0.5, 2)),
+      log_rho = log(c(runif(1, 0.1, 3),
+                      runif(1, 8, 15),
+                      runif(1, 8, 15),
+                      runif(1, 0.75, 1.5),
+                      runif(1, 0.75, 1.5))),
+      beta_p = rnorm(4),
       p_mu = p_mu,
-      logit_phi = logit(phi[1]),
-      log_zeta = log(zeta[1]),
-      # log_zeta_global = log_zeta_global,
-      # tau_zeta = tau_zeta,
-      # logit_phi_global = logit_phi_global,
-      # tau_phi = tau_phi,
+      alpha_phi = rnorm(max(constants$pH, na.rm = TRUE), 0, 0.01),
+      logit_mean_phi = logit_mean_phi,
+      sigma_phi = sigma_phi,
+      # log_mean_lpy = log(mean_lpy),
+      mean_ls = (mean_ls),
       S = S,
       R = R
     )}
