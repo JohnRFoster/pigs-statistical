@@ -153,8 +153,8 @@ for(s in 1:nrow(scenarios)){
               property = i,
               PPNum = t,
               method = m[j],
-              effort_per = E$effort_per[m[j]],
-              trap_count = E$trap_count[m[j]],
+              effort_per = ep,
+              trap_count = tc_m1,
               rep = j
             )
             Y_predict <- bind_rows(Y_predict, y_rep)
