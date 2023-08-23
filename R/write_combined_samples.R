@@ -11,7 +11,7 @@ source("R/functions_predict.R")
 
 overide_existing_samples <- FALSE
 
-rep_num <- 4
+rep_num <- 5
 out_dir <- "out/simulation"
 model_dir <- "DM_recruitData_varyingEffort"
 likelihood <- "poisson"
@@ -22,7 +22,7 @@ dest <- file.path(out_dir, model_dir, likelihood, mcmc_config, rep)
 
 message("Checking MCMC for ", file.path(model_dir, likelihood, mcmc_config, rep))
 
-mm <- get_mcmc_chunks(dest, start = 1)
+mm <- get_mcmc_chunks(dest, start = 20)
 
 all_nodes <- colnames(mm$params[[1]])
 
@@ -65,7 +65,7 @@ burnin <- GBR$last.iter[tail(which(apply(GBR$shrink[, , 2] > 1.1, 1, any)), 1) +
 print(burnin)
 
 if(is.na(burnin) | burnin >= 0.9*nrow(params[[1]])){
-  burnin <- 8e4
+  burnin <- 20000
 }
 
 mcmc_1 <- as.matrix(window(mm$params, start = burnin))
