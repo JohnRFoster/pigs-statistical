@@ -13,7 +13,7 @@ library(rgdal)
 setwd("C:/Users/John.Foster/OneDrive - USDA/Desktop/fosteR/pigs-statistical/")
 
 run_parallel <- TRUE
-rep_num <- 4
+rep_num <- 5 # starting with five using inv. gamma for initial state prior
 # set.seed(rep_num)
 out_dir <- "out/simulation"
 model_dir <- "DM_recruitData_varyingEffort"
