@@ -172,9 +172,9 @@ for(s in 1:nrow(scenarios)){
         N_predict <- bind_rows(N_predict,
                                tibble(
                                  property = i,
-                                 start_pp = t,
-                                 PPNum = t+fx,
-                                 horizon = fx,
+                                 start_pp = t, # the PP we started from (before removals, if applicable)
+                                 PPNum = t+fx, # the PP we are forecasting into
+                                 horizon = fx, # the number of PPs being forecasted across
                                  removal = scenario_name[fx],
                                  S = S,
                                  R = R,
