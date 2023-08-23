@@ -293,7 +293,7 @@ make_inits_function_dm <- function(inits_dir, constants, data, demographic_stoch
     # N[N == 0] <- 1
     inits <- function(){ list(
       N = N,
-      log_lambda_1 = log(apply(N, 1, function(x) x[min(which(!is.na(x)))])),
+      lambda_1 = (apply(N, 1, function(x) x[min(which(!is.na(x)))])),
       log_gamma = log(runif(2, 0.5, 2)),
       log_rho = log(c(runif(1, 0.1, 3),
                       runif(1, 8, 15),
