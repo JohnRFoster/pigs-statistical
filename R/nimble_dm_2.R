@@ -34,7 +34,7 @@ modelCode <- nimbleCode({
   # log_mean_lpy ~ dnorm(0, tau = 1)
 
   # mean_ls <- exp(log_mean_ls)  # mean litter size
-  mean_ls ~ dunif(1, 10)
+  mean_ls ~ dinvgamma(3, 20)
 
   # for(i in 1:n_lpy){
   #   K[i] ~ dexp(mean_lpy)
@@ -148,8 +148,8 @@ modelCode <- nimbleCode({
     # eps_property_pR[i] ~ dnorm(0, tau = 1) # property effect in observation model
 
     N[i, PPNum[i, 1]] ~ dpois(lambda_1[i])
-    log(lambda_1[i]) <- log_lambda_1[i]
-    log_lambda_1[i] ~ dnorm(5, tau = 1)
+    # log(lambda_1[i]) <- log_lambda_1[i]
+    lambda_1[i] ~ dinvgamma(1, 100)
 
     for(t in 2:n_timesteps[i]){ # loop through sampled PP only
       N[i, PPNum[i, t]] ~ dpois(dm[i, PPNum[i, t]])
