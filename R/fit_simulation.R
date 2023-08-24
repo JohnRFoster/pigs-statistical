@@ -13,7 +13,7 @@ library(rgdal)
 setwd("C:/Users/John.Foster/OneDrive - USDA/Desktop/fosteR/pigs-statistical/")
 
 run_parallel <- TRUE
-rep_num <- 5 # starting with five using inv. gamma for initial state prior
+rep_num <- 70 # starting with five using inv. gamma for initial state prior
 # set.seed(rep_num)
 out_dir <- "out/simulation"
 model_dir <- "DM_recruitData_varyingEffort"
@@ -124,8 +124,8 @@ custom_samplers <- tibble(
   type = c("AF_slice", "AF_slice", "AF_slice")
 )
 
-n_iter <- 10000
-n_chains <- 3
+n_iter <- 50000
+n_chains <- 1
 max_iter <- 500000
 
 
@@ -174,6 +174,7 @@ if(run_parallel){
     demographic_stochasticity = demographic_stochasticity
   )
 
+
   Rmodel <- nimbleModel(
     code = modelCode,
     constants = constants,
@@ -187,6 +188,72 @@ if(run_parallel){
   # Rmodel$simulate(Rmodel$getDependencies('logit_phi'))
 
   Rmodel$initializeInfo()
+
+  library(compareMCMCs)
+  nimbleMCMCdefs <- list(
+
+    default = function(model){
+      mcmcConf <- configureMCMC(model)
+      mcmcConf
+    },
+
+    RW = function(model){
+      mcmcConf <- configureMCMC(model, onlyRW = TRUE)
+      mcmcConf
+    }
+
+    # AFblock_data = function(model){
+    #   mcmcConf <- configureMCMC(model)
+    #   mcmcConf$removeSamplers(c('log_gamma', 'log_rho', 'p_mu'))
+    #   mcmcConf$addSampler(target = c("log_rho[1]", "p_mu[1]"), type = "AF_slice")
+    #   mcmcConf$addSampler(target = c("log_rho[2]", "p_mu[2]"), type = "AF_slice")
+    #   mcmcConf$addSampler(target = c("log_rho[3]", "p_mu[3]"), type = "AF_slice")
+    #   mcmcConf$addSampler(target = c("log_rho[4]", "p_mu[4]", "log_gamma[1]"), type = "AF_slice")
+    #   mcmcConf$addSampler(target = c("log_rho[5]", "p_mu[5]", "log_gamma[2]"), type = "AF_slice")
+    #   mcmcConf
+    # },
+    #
+    # RWblock_data = function(model){
+    #   mcmcConf <- configureMCMC(model)
+    #   mcmcConf$removeSamplers(c('log_gamma', 'log_rho', 'beta_p', 'p_mu'))
+    #   mcmcConf$addSampler(target = c("log_rho[1]", "p_mu[1]"), type = "RW_block")
+    #   mcmcConf$addSampler(target = c("log_rho[2]", "p_mu[2]"), type = "RW_block")
+    #   mcmcConf$addSampler(target = c("log_rho[3]", "p_mu[3]"), type = "RW_block")
+    #   mcmcConf$addSampler(target = c("log_rho[4]", "p_mu[4]", "log_gamma[1]"), type = "RW_block")
+    #   mcmcConf$addSampler(target = c("log_rho[5]", "p_mu[5]", "log_gamma[2]"), type = "RW_block")
+    #   mcmcConf
+    # }
+
+  )
+
+  init_vals <- inits()
+
+  mcmcResults_nimble <- compareMCMCs(
+    modelInfo = list(code = modelCode,
+                     data = data,
+                     constants = constants, # centered
+                     inits = init_vals),
+    # Omit monitors argument to
+    # use default monitors: top-level parameters
+    MCMCs = c('default',
+              'RW'), # Ditto
+    nimbleMCMCdefs = nimbleMCMCdefs,
+    MCMCcontrol = list(niter = 4000, burnin = 100)
+  )
+
+  # MCMC efficiency for a parameter is defined as the effective sample size divided by computation time in seconds
+  # It is the number of effectively independent samples generated per second.
+  res <- combineMetrics(mcmcResults_nimble)
+  res$byMCMC
+  res$byParameter |>
+    as_tibble() |>
+    filter(Parameter == "log_mean_ls")
+
+  mcmcResults_nimble[['default']]$metrics$byParameter
+  # mcmcResults_nimble[['AFslice_data']]$metrics$byParameter
+  mcmcResults_nimble[['AFblock_data']]$metrics$byParameter
+  mcmcResults_nimble[['RWblock_data']]$metrics$byParameter
+  make_MCMC_comparison_pages(mcmcResults_nimble, modelName = "mis_dm")
 
   # default MCMC configuration
   mcmcConf <- configureMCMC(Rmodel, useConjugacy = TRUE)
@@ -214,7 +281,7 @@ if(run_parallel){
   Cmodel <- compileNimble(Rmodel)
   Cmcmc <- compileNimble(Rmcmc)
 
-  n_iter <- 1000
+  n_iter <- 20000
   n_chains <- 3
 
   samples <- runMCMC(
