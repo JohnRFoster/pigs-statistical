@@ -18,7 +18,7 @@ modelCode <- nimbleCode({
 
   # estimate apparent survival
   logit_mean_phi ~ dnorm(phi_prior_mean, tau = phi_prior_tau)
-  sigma_phi ~ dinvgamma(1, 1)
+  sigma_phi ~ dgamma(0.01, 0.01)
   # log(sigma_phi) <- log_sigma_phi
   tau_phi <- 1/sigma_phi^2
   for(i in 1:n_property){
@@ -34,7 +34,7 @@ modelCode <- nimbleCode({
   # log_mean_lpy ~ dnorm(0, tau = 1)
 
   # mean_ls <- exp(log_mean_ls)  # mean litter size
-  mean_ls ~ dinvgamma(3, 20)
+  mean_ls ~ dgamma(1, 0.1)
 
   # for(i in 1:n_lpy){
   #   K[i] ~ dexp(mean_lpy)
@@ -149,7 +149,7 @@ modelCode <- nimbleCode({
 
     N[i, PPNum[i, 1]] ~ dpois(lambda_1[i])
     # log(lambda_1[i]) <- log_lambda_1[i]
-    lambda_1[i] ~ dinvgamma(1, 100)
+    lambda_1[i] ~ dgamma(1, 0.001)
 
     for(t in 2:n_timesteps[i]){ # loop through sampled PP only
       N[i, PPNum[i, t]] ~ dpois(dm[i, PPNum[i, t]])
