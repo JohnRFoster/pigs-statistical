@@ -306,7 +306,7 @@ make_inits_function_dm <- function(inits_dir, constants, data, demographic_stoch
       logit_mean_phi = logit_mean_phi,
       sigma_phi = sigma_phi,
       # log_mean_lpy = log(mean_lpy),
-      mean_ls = (mean_ls),
+      log_mean_ls = log(mean_ls),
       S = S,
       R = R
     )}

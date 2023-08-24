@@ -33,8 +33,8 @@ modelCode <- nimbleCode({
   # mean_lpy <- exp(log_mean_lpy)  # mean litters per year
   # log_mean_lpy ~ dnorm(0, tau = 1)
 
-  # mean_ls <- exp(log_mean_ls)  # mean litter size
-  mean_ls ~ dgamma(1, 0.1)
+  log_mean_ls ~ dnorm(2, tau = 1)  # mean litter size
+  log(mean_ls) <- log_mean_ls
 
   # for(i in 1:n_lpy){
   #   K[i] ~ dexp(mean_lpy)
