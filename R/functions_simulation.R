@@ -62,23 +62,25 @@ simulate_dm <- function(
   # method <- sample.int(5, 1, prob = method_lookup$freq)
   method <- sample.int(5, 1)
 
-  generate_take_data <- function(method){
-    if(method == 1){
-      effort_per <- rpois(1, 5) + 1
-      trap_count <- rpois(1, 2) + 1
-    } else if(method == 2){
-      effort_per <- max(0.1, rnorm(1, 1.65, 1.1))
-      trap_count <- 1
-    } else if(method == 3){
-      effort_per <- max(0.01, rexp(1, 0.75))
-      trap_count <- sample.int(4, 1, prob = c(0.935, 0.049, 0.014, 0.002))
-    } else if(method == 4){
-      effort_per <- max(1, round(rexp(1, 1)))
-      trap_count <- max(1, round(rnorm(1, 16, 10)))
-    } else if(method == 5){
-      effort_per <- max(1, round(rnorm(1, 1, 8)))
-      trap_count <- max(1, round(rnorm(1, 1, 8)))
-    }
+  data_timestep <- read_csv("data/insitu/MIS_2020_timesteps.csv")
+  effort_data_lookup <- tibble(
+    method_name = c("TRAPS, CAGE", "FIREARMS", "SNARE", "HELICOPTER", "FIXED WING"),
+    method = c(5, 1, 4, 3, 2)
+  )
+
+  effort_data <- data_timestep |>
+    select(method, effort, trap_count) |>
+    rename(method_name = method) |>
+    left_join(effort_data_lookup)
+
+  generate_take_data <- function(m, effort_data){
+    x <- effort_data |>
+      filter(method == m)
+
+    effort <- sample(x$effort, 1)
+    trap_count <- sample(x$trap_count, 1)
+    effort_per <- effort / trap_count
+
     tibble(effort_per = effort_per, trap_count = trap_count)
   }
 
@@ -110,7 +112,7 @@ simulate_dm <- function(
 
           # determine take method and effort
           m <- sample.int(5, 1)
-          e <- generate_take_data(m)
+          e <- generate_take_data(m, effort_data)
           effort_per <- pull(e, effort_per)
           log_effort_per <- log(effort_per)
           trap_count <- pull(e, trap_count)
