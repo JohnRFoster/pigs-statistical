@@ -3,6 +3,9 @@ modelCode <- nimbleCode({
   # priors
   for(i in 1:n_method){
     log_rho[i] ~ dnorm(0, tau = 0.1)
+  }
+
+  for(i in 1:3){
     p_mu[i] ~ dnorm(0, tau = 1)
     logit(p_unique[i]) <- p_mu[i]
   }
@@ -12,71 +15,35 @@ modelCode <- nimbleCode({
   }
 
   # non time varying coefficients - observation model
-  for(i in 1:m_p){
-    beta_p[i] ~ dnorm(0, tau = 1)
-  }
-
-  # estimate apparent survival
-  logit_mean_phi ~ dnorm(phi_prior_mean, tau = phi_prior_tau)
-  sigma_phi ~ dgamma(0.01, 0.01)
-  # log(sigma_phi) <- log_sigma_phi
-  tau_phi <- 1/sigma_phi^2
-  for(i in 1:n_property){
-    for(t in 1:(n_pp_prop[i]-1)){
-      # alpha_phi[pH[i, t]] ~ dnorm(0, tau = tau_phi)
-      logit_phi[pH[i, t]] ~ dnorm(logit_mean_phi, tau = tau_phi)
-      logit(phi[pH[i, t]]) <- logit_phi[pH[i, t]]
+  for(m in 1:n_method){
+    beta1[m] ~ dnorm(0, tau = 1)
+    for(i in 1:m_p){
+      beta_p[m, i] ~ dnorm(0, tau = 1)
     }
   }
 
-  # estimate per capita recruitment
-  # mean_lpy <- exp(log_mean_lpy)  # mean litters per year
-  # log_mean_lpy ~ dnorm(0, tau = 1)
+  # estimate apparent survival
+  phi_mu ~ dbeta(phi_mu_a, phi_mu_b)
+  psi_phi ~ dgamma(1, 0.001)
+  a_phi <- phi_mu * psi_phi
+  b_phi <- (1 - phi_mu) * psi_phi
 
   log_mean_ls ~ dnorm(2, tau = 1)  # mean litter size
   log(mean_ls) <- log_mean_ls
 
-  # for(i in 1:n_lpy){
-  #   K[i] ~ dexp(mean_lpy)
-  # }
-
+  ## convert to expected number of pigs per primary period
+  log_zeta_mu <- log(pp_len) + log_mean_ls - log(365)
+  log(zeta) <- log_zeta_mu
   for(i in 1:n_ls){
     J[i] ~ dpois(mean_ls)
   }
-
-  # convert to expected number of pigs per primary period
-  zeta_mu <- 1 / 365 * pp_len * mean_ls
-  for(i in 1:n_pp){
-    zeta[i] <- zeta_mu
-  }
-
-  # property dispersion
-  if(likelihood_nb){
-    for(i in 1:n_county){
-      size[i] ~ dunif(0, 20)
-    }
-  }
-
-  # for(i in 1:n_trap_snare){
-  #   log_potential_area[ts_idx[i]] <- log_pi +
-  #     (2 * (log_rho[method[ts_idx[i]]] + log_effort_per[ts_idx[i]] -
-  #             log(exp(log_gamma[method[ts_idx[i]]-3]) + effort_per[ts_idx[i]]))) +
-  #     log(1 + (p_unique[method[ts_idx[i]]] * n_trap_m1[ts_idx[i]]))
-  # }
-  #
-  # for(i in 1:n_shooting){
-  #   log_potential_area[shooting_idx[i]] <- log_rho[method[shooting_idx[i]]] +
-  #     log_effort_per[shooting_idx[i]] -
-  #     # log(exp(log_gamma[method[shooting_idx[i]]]) + effort_per[shooting_idx[i]]) +
-  #     log(1 + (p_unique[method[shooting_idx[i]]] * n_trap_m1[shooting_idx[i]]))
-  # }
 
   for(i in 1:n_survey){
 
     log_potential_area[i] <- calc_log_potential_area(
       log_rho = log_rho[1:n_method],
       log_gamma = log_gamma[1:2],
-      p_unique = p_unique[1:n_method],
+      p_unique = p_unique[1:3],
       log_effort_per = log_effort_per[i],
       effort_per = effort_per[i],
       n_trap_m1 = n_trap_m1[i],
@@ -84,28 +51,14 @@ modelCode <- nimbleCode({
       method = method[i]
     )
 
-    # log_pr_area_sampled[i] <- min(0, log_potential_area[i] - log_survey_area_km2[i])
-
     # probability of capture, given that an individual is in the surveyed area
-    log_theta[i] <- log(ilogit(inprod(X_p[i, 1:m_p], beta_p[1:m_p]))) +
+    log_theta[i] <- log(
+      ilogit(beta1[method[i]] + inprod(X_p[i, 1:m_p], beta_p[method[i], 1:m_p]))
+    ) +
       min(0, log_potential_area[i] - log_survey_area_km2[i])
 
-    # data model
-    if(likelihood_binom){
-      y[i] ~ dbinom(p[i], z[i])
-    }
-
-    if(likelihood_nb){
-      y[i] ~ dnegbin(py[i], size[p_county_idx[i]])
-      py[i] <- size[p_county_idx[i]] / (y_mu[i] + size[p_county_idx[i]])
-      y_mu[i] <- p[i] * z[i]
-    }
-
-    if(likelihood_poisson){
-      y[i] ~ dpois(p[i] * N[p_property_idx[i], p_pp_idx[i]])
-    }
-
-    # z[i] <- N[p_property_idx[i], p_pp_idx[i]] - y_sum[i]
+    # likelihood
+    y[i] ~ dpois(p[i] * (N[p_property_idx[i], p_pp_idx[i]] - y_sum[i]))
 
   }
 
@@ -147,36 +100,28 @@ modelCode <- nimbleCode({
 
     # eps_property_pR[i] ~ dnorm(0, tau = 1) # property effect in observation model
 
-    N[i, PPNum[i, 1]] ~ dpois(lambda_1[i])
-    # log(lambda_1[i]) <- log_lambda_1[i]
-    lambda_1[i] ~ dgamma(1, 0.001)
-
-    for(t in 2:n_timesteps[i]){ # loop through sampled PP only
-      N[i, PPNum[i, t]] ~ dpois(dm[i, PPNum[i, t]])
-    }
+    log_lambda_1[i] ~ dunif(0, 10)
+    log(N[i, PPNum[i, 1]]) <- log_lambda_1[i]
 
     # population growth across time steps
-    dm[i, all_pp[i, 1]] <- N[i, PPNum[i, 1]]
     for(j in 2:n_pp_prop[i]){ # loop through every PP, including missing ones
 
-      Z[i, j-1] <- dm[i, all_pp[i, j-1]] - rem[i, j-1]
+      lambda[i, all_pp[i, j]] <- N[i, all_pp[i, j-1]] * zeta / 2 +
+        N[i, all_pp[i, j-1]] * phi[pH[i, j-1]]
+      N[i, all_pp[i, j]] ~ dpois(lambda[i, all_pp[i, j]])
+      phi[pH[i, j-1]] ~ dbeta(a_phi, b_phi)
 
-      if(demographic_stochasticity){
-        S[i, j-1] ~ dbinom(phi[pH[i, j-1]], Z[i, j-1])
-        R[i, j-1] ~ dpois(zeta[all_pp[i, j-1]] * Z[i, j-1] / 2)
-      } else {
-        S[i, j-1] <- phi[pH[i, j-1]] * Z[i, j-1]
-        R[i, j-1] <- zeta[all_pp[i, j-1]] * Z[i, j-1] / 2
-      }
-      dm[i, all_pp[i, j]] <- S[i, j-1] + R[i, j-1] + s[n_county_idx[i]]
-      lambda[pH[i, j-1]] <- dm[i, all_pp[i, j]] / dm[i, all_pp[i, j-1]]
     }
 
   }
 
+
   # for easier monitoring of abundance - long format
   for(i in 1:n_units){
     xn[i] <- N[property_x[i], pp_x[i]]
+
+    # omega[i] ~ dunif(0, 1)
+    # z[i] ~ dbern(omega[i])
   }
 
   # for(i in 1:n_county_units){ # county unit is a county x PP combination
