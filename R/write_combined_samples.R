@@ -11,28 +11,36 @@ source("R/functions_predict.R")
 
 overide_existing_samples <- FALSE
 
-rep_num <- 5
+rep_num <- 7
 out_dir <- "out/simulation"
-model_dir <- "DM_recruitData_varyingEffort"
+model_dir <- "modifiedDM_betaSurvival_Informative"
 likelihood <- "poisson"
-mcmc_config <- "customMCMC_conjugate"
+mcmc_config <- "customMCMC"
 rep <- paste0("simulation_", rep_num)
 
 dest <- file.path(out_dir, model_dir, likelihood, mcmc_config, rep)
-
 message("Checking MCMC for ", file.path(model_dir, likelihood, mcmc_config, rep))
 
-mm <- get_mcmc_chunks(dest, start = 20)
+# out_dir <- "out/data"
+# model_dir <- "modifiedDM_recruitData_varyingEffort_captureByMethod"
+# likelihood <- "poisson"
+# mcmc_config <- "customMCMC"
+# dest <- file.path(out_dir, model_dir, likelihood, mcmc_config)
+
+
+mm <- get_mcmc_chunks(dest, start = 1)
 
 all_nodes <- colnames(mm$params[[1]])
 
 params_check <- c(
   "beta_p",
+  "beta1",
   "log_gamma",
   "log_rho",
-  "logit_mean_phi",
-  "sigma_phi",
-  "mean_ls",
+  "phi_mu",
+  "psi_phi",
+  # "tau_dem",
+  "log_mean_ls",
   "p_mu"
 )
 
@@ -65,8 +73,10 @@ burnin <- GBR$last.iter[tail(which(apply(GBR$shrink[, , 2] > 1.1, 1, any)), 1) +
 print(burnin)
 
 if(is.na(burnin) | burnin >= 0.9*nrow(params[[1]])){
-  burnin <- 20000
+  burnin <- 60000
 }
+
+# burnin <- 100
 
 mcmc_1 <- as.matrix(window(mm$params, start = burnin))
 mcmc_2 <- as.matrix(window(mm$predict, start = burnin))
@@ -75,15 +85,15 @@ draws <- sample.int(nrow(mcmc_1), 5000, replace = TRUE)
 
 samples <- cbind(mcmc_1[draws,], mcmc_2[draws,])
 
+if(grepl("simulation", out_dir)){
+  sim_data <- read_rds(file.path(dest, "sim_data.rds"))
+} else {
+  sim_data <- read_rds(file.path(dest, "nimbleList.rds"))
+}
 
-# rds <- read_rds(file.path(dest, "posterior.rds"))
-# samples <- rds$samples
-# psrf <- rds$psrf
-# effective_samples <- rds$effective_samples
-# burnin <- rds$burnin
-sim_data <- read_rds(file.path(dest, "sim_data.rds"))
 constants <- sim_data$constants
 data <- sim_data$data
+
 post <- data_posteriors(samples, constants, data)
 
 write_rds(
