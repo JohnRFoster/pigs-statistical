@@ -26,426 +26,173 @@ library(rgdal)
 library(coda)
 library(mgcv)
 source("../R/functions_nimble.R")
+file_dir <- "../out/simulation"
+df <- read_csv(file.path(file_dir, "summaryRecovered_litterSize.csv"))
 
-matrix_to_long <- function(mat){
-  mat |> 
-    as_tibble() |> 
-    pivot_longer(cols = everything(),
-                 names_to = "node")
-}
-
-m_all <- phi_mean_all <- sigma_phi_all <- beta_p_all <- gamma_all <- rho_all <- phi_all <- litter_size_all <- lpy_all <- p_mu_all <- n_all <- tibble()
+n_experiments <- length(unique(df$simulation))
 
 ```
 
-```{r}
-#| label: data
 
-out_dir <- "../out/simulation"
-model_dir <- "DM_recruitData_varyingEffort"
-likelihood <- "poisson"
-mcmc_config <- "customMCMC_conjugate"
-rep_num <- 2:3
+Total number of simulations run: `r n_experiments`
 
-params <- c(
-  "beta_p",
-  "log_gamma",
-  "log_rho",
-  "logit_mean_phi",
-  "sigma_phi",
-  "mean_ls",
-  "p_mu"
-)
-
-all_samples <- tibble()
-all_take <- tibble()
-all_N <- tibble()
-all_M <- tibble()
-all_beta_p <- tibble()
-all_pop_growth <- tibble()
-all_phi <- tibble()
-all_properties <- tibble()
-all_methods <- tibble()
-all_y <- tibble()
-all_area <- tibble()
-property_lookup <- tibble()
-
-for(i in rep_num){
-  dest <- file.path(out_dir, model_dir, likelihood, mcmc_config, paste0("simulation_", i))  
-  rds <- read_rds(file.path(dest, "posterior.rds"))
-  samples <- as_tibble(rds$samples) |> mutate(simulation = i)
-  all_samples <- bind_rows(all_samples, samples)
-  
-  y_pred <- rds$y_pred
-  colnames(y_pred) <- 1:ncol(y_pred)
-  y_pred <- as_tibble(y_pred)  |> mutate(simulation = i)
-  all_y <- bind_rows(all_y, y_pred)
-  
-  pot_area <- rds$potential_area
-  colnames(pot_area) <- 1:ncol(pot_area)
-  pot_area <- as_tibble(pot_area)  |> mutate(simulation = i)
-  all_area <- bind_rows(all_area, pot_area)
-  
-  sim_data <- read_rds(file.path(dest, "sim_data.rds"))
-  
-  take <- sim_data$take |> mutate(simulation = i, p_id = 1:n())
-  all_take <- bind_rows(all_take, take)
-  
-  N <- sim_data$N |> mutate(simulation = i)
-  all_N <- bind_rows(all_N, N)
-  
-  M <- sim_data$M |> mutate(simulation = i)
-  all_M <- bind_rows(all_M, M)
-  
-  county_to_property <- sim_data$county_to_property |> 
-    mutate(simulation = i)
-  property_lookup <- bind_rows(property_lookup, county_to_property)
-  
-  bH <- tibble(
-    position = 1:length(sim_data$beta_p),
-    actual = sim_data$beta_p,
-    simulation = i
-    )
-  all_beta_p <- bind_rows(all_beta_p, bH)
-  
-  popH <- as_tibble(sim_data$pop_growth) |> 
-    mutate(simulation = i)
-  all_pop_growth <- bind_rows(all_pop_growth, popH)
-  
-  # table for which phi matches to each property and PP
-  pH <- sim_data$constants$pH |> 
-    as_tibble() |>  
-    mutate(property = 1:n()) |> 
-    pivot_longer(cols = -property, 
-                 names_to = "timestep", 
-                 values_to = "idx") |> 
-    filter(!is.na(idx)) |> 
-    mutate(simulation = i)
-  
-  # table for which primary periods are observed at each property
-  ph_1 <- sim_data$constants$PPNum |>
-     as_tibble() |>
-     mutate(property = 1:n()) |>
-     pivot_longer(cols = -property,
-                  names_to = "timestep",
-                  values_to = "PPNum") |>
-    filter(!is.na(PPNum)) |>
-    group_by(property) |>
-    filter(PPNum < max(PPNum)) |>
-    ungroup() |>
-    mutate(simulation = i,
-           observation = 1) |> 
-    select(-timestep)
-  
-  # the known phi value for each PP in each property
-  ph_2 <- sim_data$phi |> 
-    as_tibble() |>  
-    mutate(property = 1:n()) |> 
-    pivot_longer(cols = -property, 
-                 names_to = "PPNum", 
-                 values_to = "phi") |> 
-    mutate(PPNum = as.integer(PPNum)) |> 
-    filter(!is.na(phi)) |> 
-    mutate(simulation = i)
-  
-  # all pp between first and last sample for each property
-  ph_3 <- sim_data$constants$all_pp |> 
-    as_tibble() |>  
-    mutate(property = 1:n()) |> 
-    pivot_longer(cols = -property, 
-                 names_to = "timestep", 
-                 values_to = "PPNum") |> 
-    filter(!is.na(PPNum)) |>
-    mutate(simulation = i) |> 
-    group_by(property) |>
-    filter(PPNum < max(PPNum)) |>
-    ungroup()
-  
-  phj_1 <- left_join(ph_3, ph_2)
-  phj_2 <- left_join(phj_1, pH)
-  phj_3 <- left_join(phj_2, ph_1) |> 
-    mutate(observation = if_else(is.na(observation), 0, observation))
-  all_phi <- bind_rows(all_phi, phj_3)
-  
-  method_lookup <- sim_data$method_lookup |> 
-    mutate(simulation = i)
-  
-  all_methods <- bind_rows(all_methods, method_lookup)
-  
-  property_attributes <- read_rds(file.path(dest, "property_attributes.rds"))  
-  pa <- property_attributes |> 
-    select(-logit_mean_phi, -sigma_phi, -initial_abundnace) |> 
-    mutate(simulation = i)
-  
-  all_properties <- bind_rows(all_properties, pa)
-
-  
-}
-
-X <- all_take |> 
-  select(simulation, county, property, area_property, contains("c_")) |> 
-  distinct()
-
-beta_p_wide <- all_samples |> 
-  select(contains("beta_p["), simulation)
-
-# all_theta <- tibble()
-# for(i in 1:max(X$county)){
-#   Xc <- X |> filter(county == i)
-#   theta_star <- left_join(beta_p_wide, Xc) |> 
-#     mutate(theta = boot::inv.logit(
-#               `beta_p[1]` +
-#               `beta_p[2]` * c_road_den +
-#               `beta_p[3]` * c_rugged +
-#               `beta_p[4]` * c_canopy),
-#            log_theta = log(theta))
-#   all_theta <- bind_rows(all_theta, theta_star)
-# }
-# 
-# theta <- all_theta |> 
-#   group_by(simulation, county, property) |> 
-#   summarise(low = quantile(theta, 0.025),
-#             med = quantile(theta, 0.5),
-#             high = quantile(theta, 0.975)) |> 
-#   ungroup() 
-# 
-# theta_med <- theta |> 
-#   select(-low, -high) |> 
-#   rename(theta_med = med)
-
-beta_p <- all_samples |> 
-  select(contains("beta_p["), simulation) |> 
-  pivot_longer(cols = -simulation,
-               names_to = "node") |> 
-  mutate(position = as.numeric(str_extract(node, "(?<=\\[)\\d"))) |> 
-  left_join(all_beta_p) |> 
-  mutate(residual = value - actual) |> 
-  group_by(node, position) |> 
-  summarise(low = quantile(residual, 0.025),
-            med = quantile(residual, 0.5),
-            high = quantile(residual, 0.975)) |> 
-  ungroup() 
-
-gH <- all_methods |> 
-  select(idx, gamma, method, simulation) |> 
-  filter(method %in% c("SNARE", "TRAPS")) |> 
-  mutate(idx = idx - 3)
-gamma <- all_samples |> 
-  select(contains("log_gamma["), simulation) |> 
-  pivot_longer(cols = -simulation,
-               names_to = "node") |> 
-  mutate(idx = as.numeric(str_extract(node, "(?<=\\[)\\d"))) |> 
-  mutate(value = exp(value)) |>
-  left_join(gH) |> 
-  mutate(residual = value - gamma) |> 
-  group_by(method) |> 
-  summarise(low = quantile(residual, 0.025),
-            med = quantile(residual, 0.5),
-            high = quantile(residual, 0.975)) |> 
-  ungroup() 
-
-rH <- all_methods |> 
-  select(idx, rho, method, simulation)
-rho <- all_samples |> 
-  select(contains("log_rho["), simulation) |> 
-  pivot_longer(cols = -simulation,
-               names_to = "node") |> 
-  mutate(idx = as.numeric(str_extract(node, "(?<=\\[)\\d"))) |> 
-  mutate(value = exp(value)) |>
-  left_join(rH) |> 
-  mutate(residual = value - rho) |> 
-  group_by(method) |> 
-  summarise(low = quantile(residual, 0.025),
-            med = quantile(residual, 0.5),
-            high = quantile(residual, 0.975)) |> 
-  ungroup() 
-
-pH <- all_methods |> 
-  select(idx, p_unique, method, simulation)
-p_mu <- all_samples |> 
-  select(contains("p_mu["), simulation) |> 
-  pivot_longer(cols = -simulation,
-               names_to = "node") |> 
-  mutate(idx = as.numeric(str_extract(node, "(?<=\\[)\\d"))) |> 
-  mutate(value = ilogit(value)) |> 
-  left_join(pH) |> 
-  mutate(residual = value - p_unique) |> 
-  group_by(method) |> 
-  summarise(low = quantile(residual, 0.025),
-            med = quantile(residual, 0.5),
-            high = quantile(residual, 0.975)) |> 
-  ungroup() 
-
-# phi <- all_samples |> 
-#   select(contains("phi["), simulation) |> 
-#   pivot_longer(cols = -simulation,
-#                names_to = "node") |> 
-#   filter(!is.na(value)) |> 
-#   mutate(idx = as.numeric(str_extract(node, "(?<=\\[)\\d*"))) |> 
-#   group_by(node, idx, simulation) |> 
-#   summarise(low = quantile(value, 0.025),
-#             med = quantile(value, 0.5),
-#             high = quantile(value, 0.975)) |> 
-#   ungroup() |> 
-#   left_join(all_phi)
-
-abundance <- left_join(property_lookup, all_N) |> 
-  select(n_id, county, property, PPNum, abundance, density, simulation, area_property)
-
-xn <- all_samples |> 
-  select(contains("xn["), simulation) |> 
-  pivot_longer(cols = -simulation,
-               names_to = "node") |> 
-  filter(!is.na(value)) |> 
-  mutate(n_id = as.numeric(str_extract(node, "(?<=\\[)\\d*"))) |> 
-  left_join(abundance) |> 
-  filter(!is.na(abundance))
-
-xn_posterior <- xn |> 
-  mutate(estimated_density = value / area_property) |> 
-  group_by(node, n_id, county, property, PPNum, abundance, simulation, area_property, density) |> 
-  summarise(low_abundance = quantile(value, 0.025),
-            med_abundance = quantile(value, 0.5),
-            high_abundance = quantile(value, 0.975),
-            low_density = quantile(estimated_density, 0.025),
-            med_density = quantile(estimated_density, 0.5),
-            high_density = quantile(estimated_density, 0.975)) |> 
-  ungroup()
-  
-xn_error <- xn |> 
-  mutate(estimated_density = value / area_property) |> 
-  group_by(node, n_id, county, property, PPNum, abundance, simulation, area_property, density) |> 
-  summarise(mae_abundance = mean(abs(value - abundance)),
-            mae_density = mean(abs(estimated_density - density)),
-            mpe_abundance = mean(abs((value+1) - (abundance+1))/(abundance+1))*100,
-            mpe_density = mean(abs((estimated_density+0.1) - (density+0.1))/(density+0.1))*100,
-            mbias_abundance = mean(value - abundance),
-            mbias_density = mean(estimated_density - density),
-            mse_abundance = mean((value - abundance)^2),
-            mse_density = mean((estimated_density - density)^2),
-            rmse_abundance = (sqrt(mse_abundance)),
-            rmse_density = (sqrt(mse_density))) |> 
-  ungroup() |> 
-  arrange(simulation, property, PPNum) |>  
-  group_by(simulation, property) |>  
-  mutate(delta = PPNum - lag(PPNum)) 
-
-
-posterior_take <- all_y |> 
-  pivot_longer(cols = -simulation,
-               names_to = "p_id") |> 
-  filter(!is.na(value)) |> 
-  mutate(p_id = as.numeric(p_id)) |> 
-  group_by(simulation, p_id) |> 
-  summarise(low = quantile(value, 0.025),
-            med = quantile(value, 0.5),
-            high = quantile(value, 0.975)) |> 
-  ungroup() |> 
-  left_join(all_take)
-  
-
-```
 
 ## Litter size
 
-The reproduction part of the process model has been reparameterized to assume that females have one litter per year. This way we only have to estimate one parameter, which is the number of piglets per litter. The prior for litter size was $Uniform(1, 10)$
+The reproduction part of the process model has been reparameterized to assume that females have one litter per year. This way we only have to estimate one parameter, which is the number of piglets per litter. The prior for litter size is 
+
+$$ls \sim exp(N(0, 2))$$
+
 
 ```{r Reproduction parameters}
-#| label: fig-repro
-#| fig-cap: "95% CI of the estimated number of litters per year and litter size."
+#| label: fig-reproSummary
+#| fig-cap: "95% CI of the resdiuals for litter size across all simulations"
 
-all_samples |> 
-  select(contains("mean_ls")) |> 
-  summarise(low = quantile(mean_ls, 0.025),
-            med = quantile(mean_ls, 0.5),
-            high = quantile(mean_ls, 0.975),
-            actual = 5.290323,
-            Parameter = "Mean litter size") |> 
+
+
+df <- read_csv(file.path(file_dir, "summaryResidual_litterSize.csv"))
+
+df |> 
+  mutate(Parameter = "Mean litter size") |> 
   ggplot() +
-  aes(x = med, xmin = low, xmax = high, y = Parameter, color = "Posterior") +
-  geom_linerange(linewidth = 2) +
-  geom_point(size = 4.5) +
-  geom_point(aes(x = actual, color = "Actual"), size = 4.5, shape = 18) +
-  labs(x = "Piglets per litter",
+  aes(x = med, xmin = low, xmax = high, y = Parameter) +
+  geom_linerange(linewidth = 2, position = position_dodge(1)) +
+  geom_point(size = 4.5, position = position_dodge(1)) +
+  geom_vline(aes(xintercept = 0), linetype = "dashed") +
+  labs(x = "Residuals in mean litter size",
        y = "",
-       title = "Reproduction parameters",
+       title = "Mean litter size",
        color = element_blank()) +
   theme_bw()
 ```
+
+
+```{r Reproduction parameters}
+#| label: fig-reproRecovered
+#| fig-cap: "95% CI posteriors for litter size across all simulations, color represents if the parameter was recovered in the simulation"
+df <- read_csv(file.path(file_dir, "summaryRecovered_litterSize.csv"))
+
+percent_recovered <- function(dat){
+  sum(dat$parameter_recovered) / nrow(dat) * 100
+}
+
+ls_recovered <- percent_recovered(df)
+
+actual <- df$actual[1]
+
+df |> 
+  mutate(pr = if_else(parameter_recovered == 1, "Recovered", "Missed")) |> 
+  ggplot() +
+  aes(x = simulation, y = med, ymin = low, ymax = high, color = pr) +
+  geom_linerange() +
+  geom_point() +
+  geom_hline(aes(yintercept = actual), linetype = "dashed") +
+  labs(color = "Parameter Recovered",
+       x = "Simulation",
+       y = "Posterior Estimate") +
+  theme_bw() +
+  theme(axis.text.x = element_blank())
+
+```
+
+Percent of simulations that recovered litter size: `r ls_recovered`
 
 Across simulations litter size was accurately estimated.
 
 ## Survival
 
-Survival model:
-
-$$logit(\phi_{i,t}) \sim N(\mu_{\phi}, \sigma_{\phi})\\
-\mu_{\phi} \sim N(3.3, 1)\\
-\sigma_{\phi} \sim IG(1, 1)$$
-
 ```{r survival}
-#| label: fig-phi
+#| label: fig-phiSummary
 #| layout-ncol: 2
 #| fig-cap: "Survival"
 #| fig-subcap: 
 #|   - "Global survival"
-#|   - "Survival SD"
+#|   - "Shrinkage"
 
-# phi |>
-#   ggplot() +
-#   aes(x = med, xmin = low, xmax = high, y = phi) +
-#   # geom_linerange() +
-#   geom_point() +
-#   # geom_point(aes(x = survival_rate, color = "Actual"), size = 4.5, shape = 18) +
-#   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-#    labs(x = "Median survival rate",
-#         y = "Known survival rate",
-#        title = "Survival rate",
-#        color = element_blank()) +
-#   coord_cartesian(xlim = c(0.125, 1)) +
-#   coord_flip() +
-#   theme_bw()
+df <- read_csv(file.path(file_dir, "summaryResidual_survial.csv")) |> 
+  mutate(Parameter = if_else(node == "phi_mu", "Mean survival", "Shrinkage"))
 
-all_samples |> 
-  select(contains("logit_mean_phi")) |> 
-  mutate(value = ilogit(logit_mean_phi)) |> 
-  summarise(low = quantile(value, 0.025),
-            med = quantile(value, 0.5),
-            high = quantile(value, 0.975),
-            actual = ilogit(1.8),
-            Parameter = "Global mean survival rate") |> 
+df |> 
+  filter(Parameter == "Mean survival") |> 
   ggplot() +
-  aes(y = med, ymin = low, ymax = high, x = Parameter, color = "Posterior") +
-  geom_linerange(linewidth = 2) +
-  geom_point(size = 4.5) +
-  geom_point(aes(y = actual, color = "Actual"), size = 4.5, shape = 18) +
-  # coord_cartesian(ylim = c(0.125, 1)) +
-  labs(y = "Survival rate",
-       x = "",
-       title = "Global survival",
+  aes(x = med, xmin = low, xmax = high, y = Parameter) +
+  geom_linerange(linewidth = 2, position = position_dodge(1)) +
+  geom_point(size = 4.5, position = position_dodge(1)) +
+  geom_vline(aes(xintercept = 0), linetype = "dashed") +
+  labs(x = "Residuals in survival model",
+       y = "",
+       title = "Survival model: mean",
        color = element_blank()) +
   theme_bw()
 
-all_samples |>
-  select(contains("sigma_phi")) |>
-  mutate(value = sigma_phi) |>
-  summarise(low = quantile(value, 0.025),
-            med = quantile(value, 0.5),
-            high = quantile(value, 0.975),
-            actual = 1.2,
-            Parameter = "Standard deviation") |>
+df  |> 
+  filter(Parameter == "Shrinkage") |> 
   ggplot() +
-  aes(y = med, ymin = low, ymax = high, x = Parameter, color = "Posterior") +
-  geom_linerange(linewidth = 2) +
-  geom_point(size = 4.5) +
-  geom_point(aes(y = actual, color = "Actual"), size = 4.5, shape = 18) +
-  labs(y = "Standard deviation",
-       x = "",
-       title = "Standard deviation of survival rate",
+  aes(x = med, xmin = low, xmax = high, y = Parameter) +
+  geom_linerange(linewidth = 2, position = position_dodge(1)) +
+  geom_point(size = 4.5, position = position_dodge(1)) +
+  geom_vline(aes(xintercept = 0), linetype = "dashed") +
+  labs(x = "Residuals in survival model",
+       y = "",
+       title = "Survival model: shrinkage",
        color = element_blank()) +
   theme_bw()
+```
 
+```{r}
+#| label: fig-phiRecovered
+#| layout-ncol: 2
+#| fig-cap: "Survival by simulation"
+#| fig-subcap: 
+#|   - "Global survival"
+#|   - "Shrinkage"
 
+df <- read_csv(file.path(file_dir, "summaryRecovered_survial.csv")) |> 
+  mutate(Parameter = if_else(node == "phi_mu", "Mean survival", "Shrinkage"),
+         pr = if_else(parameter_recovered == 1, "Recovered", "Missed"))
+
+phi_recovered <- df |> 
+  group_by(Parameter) |> 
+  summarise(percent_recovered = sum(parameter_recovered) / n_experiments * 100)
+
+bad_phi <- df |> 
+  filter(parameter_recovered == 0)
+
+df |> 
+  filter(node == "phi_mu") |> 
+  ggplot() +
+  aes(x = simulation, y = med, ymin = low, ymax = high, color = pr) +
+  geom_linerange() +
+  geom_point() +
+  geom_hline(aes(yintercept = actual), linetype = "dashed") +
+  labs(color = "Parameter Recovered",
+       x = "Simulation",
+       y = "Posterior Estimate",
+       title = "Survival") +
+  theme_bw() +
+  theme(axis.text.x = element_blank())
+
+df |> 
+  filter(parameter_recovered == 0) |> 
+  ggplot() +
+  aes(x = simulation, y = med, ymin = low, ymax = high, color = "Posterior") +
+  geom_linerange() +
+  geom_point() +
+  geom_point(aes(y = actual, color = "Actual")) +
+  facet_wrap(~ Parameter, scales = "free") +
+  labs(color = "Parameter Recovered",
+       x = "Simulation",
+       y = "Posterior Estimate",
+       title = "Not recovered: survival") +
+  theme_bw() +
+  theme(axis.text.x = element_blank())
+
+```
+
+Percent of simulations recovering survival parameters:
+
+```{r}
+knitr::kable(phi_recovered)
 ```
 
 Global survival and property/timestep survival are on the same scale to show that most individual survival estimates are within the global survival posterior range.
@@ -460,14 +207,41 @@ $$
 
 where $e$ is effort per trap and $\rho$ is the search area by a unit of removal of method $m$.
 
+# Gamma
+
+
 ```{r}
 #| label: fig-gamma
-#| fig-cap: "Residual error for saturation constant (traps and snares only) across all simulations. A distribution centered on zero would mean the parameter was accurately estimated."
-gamma |> 
+
+plot_p <- function(m){
+  df |> 
+  filter(method %in% m) |> 
+  ggplot(aes(x = reorder(simulation, actual, mean), y = actual, color = "Actual")) +
+  geom_point(aes(y = med, color = "Posterior")) +
+  geom_linerange(aes(ymin = low, ymax = high, color = "Posterior")) +
+  geom_point(size = 1) +
+  facet_wrap(~ method, scales = "free") +
+  labs(x = "Simulation",
+       y = "Posterior",
+       # title = "Fixed wing (all simulations): unique area with additional units",
+       color = element_blank()) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        legend.position = "bottom")
+}
+
+method_lookup <- tibble(
+  method = c("Firearms", "Fixed wing", "Helicopter", "Snare", "Traps"),
+  idx = 1:5
+)
+df <- read_csv(file.path(file_dir, "summaryResidual_saturationConstant.csv")) |> 
+  mutate(method = c("Snare", "Traps"))
+
+df |> 
   ggplot() +
   aes(x = med, xmin = low, xmax = high, y = method) +
-  geom_linerange(size = 2) +
-  geom_point(size = 4.5) +
+  geom_linerange(linewidth = 2, position = position_dodge(0.5)) +
+  geom_point(size = 4.5, position = position_dodge(0.5)) +
   geom_vline(xintercept = 0, linetype = "dashed") +
   labs(x = "Residual error (posterior - truth)",
        y = "Method",
@@ -476,9 +250,43 @@ gamma |>
   # coord_flip() +
   theme_bw()
 
+df <- read_csv(file.path(file_dir, "summaryRecovered_saturationConstant.csv"))
+
+gamma_recovered <- df |> 
+  group_by(method) |> 
+  summarise(percent_recovered = sum(parameter_recovered) / n_experiments * 100)
+
+bad_gamma <- df |> 
+  filter(parameter_recovered == 0)
+
+df |> 
+  filter(parameter_recovered == 0) |> 
+  ggplot() +
+  aes(y = med, ymin = low, ymax = high, x = simulation, color = "Posterior") +
+  geom_linerange() +
+  geom_point() +
+  geom_point(aes(y = actual, color = "Actual")) +
+  facet_wrap(~ method, scales = "free") +
+  labs(x = "Simulation",
+       y = "Posterior",
+       title = "Not recovered: saturation constant (gamma)",
+       color = element_blank()) +
+  theme_bw() +
+  theme(axis.text.x = element_blank())
+
+plot_p("SNARE") + coord_cartesian(ylim = c(0, 65))
+plot_p("TRAPS") + coord_cartesian(ylim = c(0, 65))
+
 ```
 
-Across simulations, the $\gamma$ value used was accurately estimated, more so for traps than snares.
+
+Percent of simulations recovering saturation constant (gamma):
+
+```{r}
+knitr::kable(gamma_recovered)
+```
+
+
 
 The area searched for firearms, fixed wing aircraft, and helicopters is:
 
@@ -490,22 +298,66 @@ meaning the area searched scales linearly with effort per unit deployed.
 
 ```{r}
 #| label: fig-rho
-#| fig-cap: "Residual error for area searched across all simulations. A distribution centered on zero would mean the parameter was accurately estimated."
-rho |> 
+
+df <- read_csv(file.path(file_dir, "summaryResidual_searchArea.csv")) |> 
+  left_join(method_lookup)
+
+df |> 
   ggplot() +
   aes(x = med, xmin = low, xmax = high, y = method) +
-  geom_linerange(size = 2) +
-  geom_point(size = 4.5) +
+  geom_linerange(linewidth = 2, position = position_dodge(0.5)) +
+  geom_point(size = 4.5, position = position_dodge(0.5)) +
   geom_vline(xintercept = 0, linetype = "dashed") +
-  labs(title = "Max area sampled by method",
+  labs(x = "Residual error (posterior - truth)",
        y = "Method",
-       x = "Residual error (posterior - truth)") +
-  # facet_wrap(~ method, scales = "free") +
+       title = "Search area (rho)",
+       color = element_blank()) +
   # coord_flip() +
-  theme_bw() 
+  theme_bw()
+
+df <- read_csv(file.path(file_dir, "summaryRecovered_searchArea.csv")) |> 
+  select(-method) |> 
+  left_join(method_lookup)
+
+rho_recovered <- df |> 
+  group_by(method) |> 
+  summarise(percent_recovered = sum(parameter_recovered) / n_experiments * 100)
+
+bad_rho <- df |> 
+  filter(parameter_recovered == 0)
+
+df |> 
+  filter(parameter_recovered == 0) |> 
+  ggplot() +
+  aes(y = med, ymin = low, ymax = high, x = simulation, color = "Posterior") +
+  geom_linerange() +
+  geom_point() +
+  geom_point(aes(y = actual, color = "Actual")) +
+  facet_wrap(~ method, scales = "free") +
+  labs(x = "Simulation",
+       y = "Posterior",
+       title = "Not recovered: search area (rho)",
+       color = element_blank()) +
+  theme_bw() +
+  theme(axis.text.x = element_blank())
+
+plot_p("Firearms")
+plot_p("Fixed wing")
+plot_p("Helicopter")
+plot_p("Snare")
+plot_p("Traps")
+
 ```
 
-Across simulations, the $\rho$ values were accurately estimated, with helicopters and fixed wing aircraft having the most uncertainty.
+
+Percent of simulations recovering search area (rho):
+
+```{r}
+knitr::kable(rho_recovered)
+```
+
+
+
 
 When more than one unit of a removal method is deployed, we need to estimated the degree of overlap of search area that could occur:
 
@@ -515,20 +367,69 @@ Where $n$ is the number of units deployed and $\zeta$ is the degree of overlap. 
 
 ```{r overlap}
 #| label: fig-p
-#| fig-cap: "Residual error for area degree of overlap across all simulations. A distribution centered on zero would mean the parameter was accurately estimated."
-p_mu |> 
+
+df <- read_csv(file.path(file_dir, "summaryResidual_uniqueArea.csv")) |> 
+  left_join(method_lookup)
+
+df |> 
   ggplot() +
   aes(x = med, xmin = low, xmax = high, y = method) +
-  geom_linerange(size = 2) +
-  geom_point(size = 4.5) +
+  geom_linerange(linewidth = 2, position = position_dodge(0.5)) +
+  geom_point(size = 4.5, position = position_dodge(0.5)) +
   geom_vline(xintercept = 0, linetype = "dashed") +
-  labs(title = "Degree of overlap by method",
+  labs(x = "Residual error (posterior - truth)",
        y = "Method",
-       x = "Residual error (posterior - truth)") +
+       title = "Unique area with additional units",
+       color = element_blank()) +
   # coord_flip() +
   theme_bw()
 
+df <- read_csv(file.path(file_dir, "summaryRecovered_uniqueArea.csv")) |> 
+  select(-method) |> 
+  left_join(method_lookup)
+
+p_recovered <- df |> 
+  group_by(method) |> 
+  summarise(percent_recovered = sum(parameter_recovered) / n_experiments * 100)
+
+bad_p <- df |> 
+  filter(parameter_recovered == 0)
+
+df |> 
+  filter(parameter_recovered == 0) |> 
+  arrange(actual) |> 
+  ggplot(aes(x = simulation)) +
+  geom_point(aes(y = actual, color = "Actual")) +
+  geom_point(aes(y = med, color = "Posterior")) +
+  geom_linerange(aes(ymin = low, ymax = high, color = "Posterior")) +
+  facet_wrap(~ method, scales = "free") +
+  labs(x = "Simulation",
+       y = "Posterior",
+       title = "Not recovered: unique area with additional units",
+       color = element_blank()) +
+  theme_bw() +
+  theme(axis.text.x = element_blank())
+
+
+
+plot_p("Firearms")
+plot_p("Fixed wing")
+plot_p("Helicopter")
+plot_p("Snare")
+plot_p("Traps")
+
+
+
 ```
+
+
+Percent of simulations recovering unique area (zeta):
+
+```{r}
+knitr::kable(p_recovered)
+```
+
+
 
 Across simulations, the $\zeta$ values were accurately estimated, however with helicopters and fixed wing aircraft these posteriors do not deviate from the prior, which is most likely a sample size issue.
 
@@ -540,22 +441,66 @@ where $X$ is a matrix of land cover covariates and $\beta$ a vector of coefficie
 
 ```{r beta}
 #| label: fig-beta
-#| fig-cap: "Residual error for capture probability coeffecients across all simulations. A distribution centered on zero would mean the parameter was accurately estimated."
+
 w <- 0.7
-beta_p |> 
-  mutate(idx = position) |> 
+mH <- method_lookup |> 
+  rename(method_idx = idx)
+beta1 <- read_csv(file.path(file_dir, "summaryResidual_captureIntercept.csv"))
+beta_p <- read_csv(file.path(file_dir, "summaryResidual_captureCovariates.csv")) 
+
+beta <- bind_rows(beta1, beta_p) |> 
+  left_join(mH)
+
+beta |> 
   ggplot() +
-  aes(y = med, ymin = low, ymax = high, x = idx) +
+  aes(y = med, ymin = low, ymax = high, x = position) +
   geom_linerange(position = position_dodge(width = w), linewidth = 2) +
   geom_point(position = position_dodge(width = w), size = 4) +
-  geom_hline(aes(yintercept = 0), linetype = "dashed", position = position_dodge(width = w)) +
-  # facet_wrap(~ method, scales = "free") +
+  geom_hline(aes(yintercept = 0), linetype = "dashed") +
+  facet_wrap(~ method, scales = "free") +
   coord_flip() +
   labs(title = "Data model coefficients",
        x = "Position (1 = intercept)",
        y = "Residual error (posterior - truth)") +
   theme_bw()
+
+
+beta1 <- read_csv(file.path(file_dir, "summaryRecovered_captureIntercept.csv"))
+beta_p <- read_csv(file.path(file_dir, "summaryRecovered_captureCovariates.csv")) 
+
+beta <- bind_rows(beta1, beta_p) |> 
+  left_join(mH)
+
+beta_recovered <- beta |> 
+  group_by(method, position) |> 
+  summarise(percent_recovered = sum(parameter_recovered) / n_experiments * 100)
+
+bad_beta <- beta |> 
+  filter(parameter_recovered == 0)
+
+bad_beta |> 
+  ggplot() +
+  aes(y = med, ymin = low, ymax = high, x = simulation, color = "Posterior") +
+  geom_linerange() +
+  geom_point() +
+  geom_point(aes(y = actual, color = "Actual")) +
+  facet_grid(position ~ method, scales = "free") +
+  labs(x = "Simulation",
+       y = "Posterior",
+       title = "Not recovered: capture probability parameters",
+       color = element_blank()) +
+  theme_bw() +
+  theme(axis.text.x = element_blank())
+
 ```
+
+
+Percent of simulations recovering capture probability parameters+:
+
+```{r}
+knitr::kable(beta_recovered)
+```
+
 
 Across simulations, the $\beta$ values were accurately estimated.
 
@@ -563,20 +508,17 @@ Across simulations, the $\beta$ values were accurately estimated.
 
 ```{r N}
 #| label: fig-pred_obs
-#| layout-ncol: 2
-#| fig-cap: "Predicted vs Observed abundance and density"
-#| fig-subcap: 
-#|   - "Abundance"
-#|   - "Density"
 
 
-xx = summary(lm(med_abundance ~ abundance, data = xn_posterior))
+df <- read_csv(file.path(file_dir, "summaryPropertyAbundance.csv"))
+
+xx = summary(lm(med_abundance ~ abundance, data = df))
 
 
-xn_posterior |> 
+df |> 
   ggplot() +
   aes(y = med_abundance, x = abundance) +
-  geom_point() +
+  geom_point(size = 0.5) +
   geom_smooth(method = "lm") +
   geom_abline(intercept = 0, slope = 1) +
   labs(title = "Abundance",
@@ -585,12 +527,14 @@ xn_posterior |>
        x = "True abundance") +
   theme_bw()
 
-xx = summary(lm(med ~ take, data = posterior_take))
+df <- read_csv(file.path(file_dir, "summaryPredictedTake.csv"))
 
-posterior_take |> 
+xx = summary(lm(med ~ take, data = df))
+
+df |> 
   ggplot() +
   aes(y = med, x = take) +
-  geom_point() +
+  geom_point(size = 0.5) +
   geom_smooth(method = "lm") +
   geom_abline(intercept = 0, slope = 1) +
   labs(title = "Predicted take",
@@ -614,11 +558,13 @@ In terms of accuracy (posterior median), we tend to under predict as abundance a
 #|   - "Root mean sqaured error"
 #|   - "Bias"
 
+xn_error <- read_csv(file.path(file_dir, "PropertyAbundanceMetrics.csv"))
+
 error_plots <- function(df, xcol, ycol){
   df |> 
     ggplot() +
     aes(x = .data[[xcol]], y = .data[[ycol]]) +
-    geom_point() +
+    geom_point(size = 0.5) +
     theme_bw()
 }
 
@@ -640,7 +586,7 @@ xn_error |>
   error_plots("abundance", "rmse_abundance") +
    geom_smooth() +
   labs(#title = "RMSE abundance",
-       y = "log(RMSE)",
+       y = "RMSE",
        x = "True abundance")
 
 xn_error |> 
@@ -651,13 +597,21 @@ xn_error |>
        y = "Bias",
        x = "True abundance")
 
+xn_error |> 
+  error_plots("area_property", "rmse_abundance") +
+   geom_smooth() +
+  geom_abline(intercept = 0, slope = 0, linetype = "dashed") +
+  labs(#title = "Mean bias abundance",
+       x = "Property area (km^2)",
+       y = "RMSE")
+
 
 
 ```
 
 Not surprisingly, accuracy (mean absolute error) decreases as abundance increases, which is due to posteriors being biased low.
 
-```{r}
+```
 bad_prop <- xn_error |>
   ungroup() |> 
   filter(rmse_abundance == max(rmse_abundance)) |> 
@@ -682,7 +636,7 @@ xn_posterior |>
   theme_bw()
 ```
 
-```{r}
+```
 #| label: fig-sum_take
 #| layout-ncol: 2
 #| fig-cap: "Effort: pigs removed"
@@ -711,9 +665,9 @@ effort <- left_join(sum_take, xn_error)
 
 effort |> 
   ggplot() +
-  aes(y = mbias_abundance, x = take) +
+  aes(y = mbias_abundance, x = take, color = survival_prior) +
   geom_hline(yintercept = 0, linetype = "dashed") +
-  geom_point() +
+  geom_point(size = 0.75) +
   labs(title = "Bias",
        y = "Median bias",
        x = "Total pigs removed during primary period") +
@@ -721,8 +675,8 @@ effort |>
 
 effort |> 
   ggplot() +
-  aes(y = mpe_abundance, x = take) +
-  geom_point() +
+  aes(y = mpe_abundance, x = take, color = survival_prior) +
+  geom_point(size = 0.75) +
   labs(title = "Percent error",
        y = "Median percent error",
        x = "Total pigs removed during primary period") +
@@ -731,30 +685,30 @@ effort |>
 effort |> 
   mutate(rmse_abundance = (rmse_abundance)) |> 
   ggplot() +
-  aes(y = rmse_abundance, x = take) +
-  geom_point() +
+  aes(y = rmse_abundance, x = take, color = survival_prior) +
+  geom_point(size = 0.75) +
   labs(title = "RMSE",
-       y = "log(RMSE)",
+       y = "RMSE",
        x = "Total pigs removed during primary period") +
   theme_bw()
 
 
 ```
 
-```{r}
+```
 all_effort |> 
   ggplot() +
   aes(x = trap_count, y = rmse_abundance) +
   geom_point() +
   # geom_smooth(method = "glm") +
-  facet_wrap(~ Method, scales = "free_x") +
+  facet_grid(survival_prior ~ Method, scales = "free_x") +
   theme_bw()
 
 ```
 
 ## Firearms
 
-```{r}
+```
 #| label: fig-firearms_bias
 #| fig-cap: "Heatmaps for bias when using firearms"
 #| layout-ncol: 2
@@ -777,7 +731,7 @@ t_lab <- "log(Number of pigs removed + 1)"
 tc_lab <- "Number of firearms*"
 library(lattice)
 all_effort_sub <- all_effort
-data_f <- filter(all_effort_sub, Method == "FIREARMS") |> 
+data_f <- filter(all_effort_sub, Method == "FIREARMS", survival_prior == "Uninformative") |> 
   distinct() |> 
   mutate(take = log(take + 1))
 
@@ -808,7 +762,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 Most under predictions come from when search area is low
 
-```{r}
+```
 #| label: fig-firearms_accuracy
 #| fig-cap: "Heatmaps for mean percentage error when using firearms"
 #| layout-ncol: 2
@@ -841,7 +795,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 ```
 
-```{r}
+```
 #| label: fig-firearms_uncertainty
 #| fig-cap: "Heatmaps for RMSE when using firearms"
 #| layout-ncol: 2
@@ -876,7 +830,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 ## Fixed wing
 
-```{r}
+```
 #| label: fig-fixeding_bias
 #| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
 #| layout-ncol: 2
@@ -910,7 +864,7 @@ heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
 
 ```
 
-```{r}
+```
 #| label: fig-fixedwing_accuracy
 #| fig-cap: "Heatmaps for mean percentage error when using firearms"
 #| layout-ncol: 2
@@ -935,7 +889,7 @@ heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
 
 ```
 
-```{r}
+```
 #| label: fig-fixedwing_uncertainty
 #| fig-cap: "Heatmaps for RMSE when using firearms"
 #| layout-ncol: 2
@@ -962,7 +916,7 @@ heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
 
 ## Helicopter
 
-```{r}
+```
 #| label: fig-helicopter_bias
 #| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
 #| layout-ncol: 2
@@ -1003,7 +957,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 ```
 
-```{r}
+```
 #| label: fig-helicopter_accuracy
 #| fig-cap: "Heatmaps for mean percentage error when using firearms"
 #| layout-ncol: 2
@@ -1035,7 +989,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 ```
 
-```{r}
+```
 #| label: fig-helicopter_uncertainty
 #| fig-cap: "Heatmaps for RMSE when using firearms"
 #| layout-ncol: 2
@@ -1069,7 +1023,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 ## Snares
 
-```{r}
+```
 #| label: fig-snare_bias
 #| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
 #| layout-ncol: 2
@@ -1117,7 +1071,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 ```
 
-```{r}
+```
 #| label: fig-snare_accuracy
 #| fig-cap: "Heatmaps for mean percentage error when using firearms"
 #| layout-ncol: 2
@@ -1155,7 +1109,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 ```
 
-```{r}
+```
 #| label: fig-snare_uncertainty
 #| fig-cap: "Heatmaps for RMSE when using firearms"
 #| layout-ncol: 2
@@ -1195,7 +1149,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 ## Traps
 
-```{r}
+```
 #| label: fig-trap_bias
 #| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
 #| layout-ncol: 2
@@ -1243,7 +1197,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 ```
 
-```{r}
+```
 #| label: fig-trap_accuracy
 #| fig-cap: "Heatmaps for mean percentage error when using firearms"
 #| layout-ncol: 2
@@ -1281,7 +1235,7 @@ heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
 ```
 
-```{r}
+```
 #| label: fig-trap_uncertainty
 #| fig-cap: "Heatmaps for RMSE when using firearms"
 #| layout-ncol: 2
