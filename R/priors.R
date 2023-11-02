@@ -74,15 +74,40 @@ create_surv_prior <- function(logit = TRUE, sd_inflate = 1){
     pull(sd.4week) |>
     mean()
 
-  u <- surv_mu_summary$mu
-  var <- mean(surv_variance$variance.4week)*2
-  v <- (u * (1-u) / var) - 1
-  alpha <- u*v
-  beta <- (1-u)*v
+  mu <- surv_mu_summary$mu
+  psi <- 1 / mean(surv_variance$variance.4week)
+  alpha <- mu * psi
+  beta <- (1 - mu) * psi
+
+  # mu_phi <- mean(surv_mu$survival.per.4week)
+  # var_phi <- var(surv_mu$survival.per.4week)
+  #
+  # k_phi <- mu_phi / (var_phi / mu_phi)
+  # theta_phi <- var_phi / mu_phi
+  #
+  # k_theta <- function(mu, var){
+  #   k <- mu / (var / mu)
+  #   theta <- var / mu
+  #   c(k, theta)
+  # }
+  #
+  # g_mu <- k_theta(mean(surv_mu$survival.per.4week), var(surv_mu$survival.per.4week))
+  # g_var <- k_theta(mean(surv_variance$variance.4week), var(surv_variance$variance.4week))
+  #
+  # n <- 100000
+  # alpha <- rgamma(n, g_mu[1], 1/g_mu[2])
+  # beta <- rgamma(n, g_var[1], 1/g_var[2])
+  # phi <- numeric(n)
+  # for(i in 1:n){
+  #   phi[i] <- rbeta(1, alpha[i], beta[i])
+  # }
+  # hist(phi)
 
   return(list(
     surv_mu = ifelse(logit, surv_mu_summary$mu.logit, surv_mu_summary$mu),
-    surv_sd = surv_sd_summary * sd_inflate
+    surv_sd = surv_sd_summary * sd_inflate,
+    alpha = alpha,
+    beta = beta
   ))
 }
 
