@@ -3,8 +3,9 @@
 simulate_dm <- function(
     property_data,
     likelihood,
-    logit_mean_phi,
-    sigma_phi,
+    phi_mu,
+    psi_phi,
+    sigma_dem,
     n_pp,
     c_road_den,
     c_rugged,
@@ -43,11 +44,11 @@ simulate_dm <- function(
     method = c("FIREARMS", "FIXED WING", "HELICOPTER", "SNARE", "TRAPS"),
     freq = c(0.1, 0.05, 0.05, 0.3, 0.5),
     p_unique = runif(5),
-    rho = c(runif(1, 0.01, 5), # max radius
-            runif(1, 5, 20),
-            runif(1, 5, 20),
-            runif(1, 0.5, 2),
-            runif(1, 0.5, 2)),
+    rho = c(runif(1, 0.01, 5), # firearms; p_mu[1]
+            runif(1, 5, 20),   # fixed wing
+            runif(1, 5, 20),   # helicopter
+            runif(1, 0.5, 2),  # snare; gamma[1], p_mu[2]
+            runif(1, 0.5, 2)), # traps; gamma[2], p_mu[3]
     gamma = c(0.5, 0.01, 0.01, runif(1, 0.5, 4), runif(1, 0.5, 4))
   )
 
@@ -55,7 +56,11 @@ simulate_dm <- function(
   log_gamma <- log(method_lookup$gamma)
   p_unique <- method_lookup$p_unique
 
-  method <- sample.int(5, 1, prob = method_lookup$freq)
+  a_phi <- phi_mu * psi_phi
+  b_phi <- (1 - phi_mu) * psi_phi
+
+  # method <- sample.int(5, 1, prob = method_lookup$freq)
+  method <- sample.int(5, 1)
 
   generate_take_data <- function(method){
     if(method == 1){
@@ -104,22 +109,24 @@ simulate_dm <- function(
         for(j in seq_len(n_passes)){
 
           # determine take method and effort
-          m <- sample.int(5, 1, prob = method_lookup$freq)
+          m <- sample.int(5, 1)
           e <- generate_take_data(m)
           effort_per <- pull(e, effort_per)
           log_effort_per <- log(effort_per)
           trap_count <- pull(e, trap_count)
           n_trap_m1 <- trap_count - 1
 
-          if(m %in% 4:5){ # trap/snare data model
-            log_potential_area <- log(pi) +
-              (2 * (log_rho[m] + log_effort_per - log(exp(log_gamma[m]) + effort_per))) +
-              log(1 + (p_unique[m] * n_trap_m1))
-          } else { # shooting data model
+          if(m == 1){ # firearms
             log_potential_area <- log_rho[m] +
               log_effort_per -
-              # log(exp(log_gamma[method[unit[i, t], j]]) + effort_per[unit[i, t], j]) +
               log(1 + (p_unique[m] * n_trap_m1))
+          } else if(m == 2 | m ==3){ # fixed wing and helicopter
+            log_potential_area <- log_rho[m] + log_effort_per
+          } else if(m == 4 | m == 5){
+            log_potential_area <- log(pi) +
+              (2 * (log_rho[m] + log_effort_per -
+                      log(exp(log_gamma[m-3]) + effort_per))) +
+              log(1 + (p_unique[m-2] * n_trap_m1))
           }
 
           log_pr_area_sampled <- min(log_survey_area[i], log_potential_area)
@@ -128,10 +135,10 @@ simulate_dm <- function(
           # probability of capture, given that an individual is in the surveyed area
           log_theta[j] <- log(
             boot::inv.logit(
-              beta_p[1] +
-              beta_p[2] * c_road_den[county[i]] +
-              beta_p[3] * c_rugged[county[i]] +
-              beta_p[4] * c_canopy[county[i]])) +
+              beta_p[m, 1] +
+              beta_p[m, 2] * c_road_den[county[i]] +
+              beta_p[m, 3] * c_rugged[county[i]] +
+              beta_p[m, 4] * c_canopy[county[i]])) +
           min(0, log_potential_area - log_survey_area[i])
 
           if(j == 1){
@@ -144,11 +151,11 @@ simulate_dm <- function(
           p_check <- c(p_check, p)
 
           if(likelihood == "binomial"){
-            C[j] <- min(rbinom(1, N[i, t], p), n_avail)
+            C[j] <- min(rbinom(1, n_avail, p), n_avail)
           } else if(likelihood == "nb"){
-            C[j] <- min(rnbinom(1, mu = N[i, t] * p, size = size[county[i]]), n_avail)
+            C[j] <- min(rnbinom(1, mu = n_avail * p, size = size[county[i]]), n_avail)
           } else if(likelihood == "poisson"){
-            C[j] <- min(rpois(1, N[i, t] * p), n_avail)
+            C[j] <- min(rpois(1, n_avail * p), n_avail)
           }
 
           et <- tibble(
@@ -162,21 +169,29 @@ simulate_dm <- function(
           E <- bind_rows(E, et)
 
         }
-        z <- N[i, t] - sum(C)
+        z <- N[i, t] #- sum(C)
       } else {
         z <- N[i, t]
       }
 
       if(t < n_pp){
-        phi[i, t] <- boot::inv.logit(rnorm(1, logit_mean_phi, sigma_phi))
+        # phi[i, t] <- boot::inv.logit(rnorm(1, logit_mean_phi, sigma_phi))
+        phi[i, t] <- rbeta(1, a_phi, b_phi)
         if(demographic_stochasticity){
-          S <- rbinom(1, z, phi[i, t])  # survival
-          R <- rpois(1, zeta/2*z) # recruitment
+          # S <- rbinom(1, z, phi[i, t])  # survival
+          # R <- rpois(1, zeta/2*z) # recruitment
+
+          # z <- max(0.00001, z)
+          # log_lam <- log(z) + log(zeta/2 + phi[i, t])
+          lam <- z * zeta / 2 + z * phi[i, t]
+          # Ndem <- max(0, rnorm(1, lam, sigma_dem))
+
         } else {
           S <- round(z * phi[i, t])
           R <- round(zeta * z / 2)
         }
-        N[i, t+1] <- S + R
+        # N[i, t+1] <- S + R
+        N[i, t+1] <- rpois(1, lam)
         if(N[i, t] != 0){
           pop_growth[i, t] <- N[i, t+1] / N[i, t]
         }
@@ -184,10 +199,15 @@ simulate_dm <- function(
     }
   }
 
-  # if(plot){
-    # plot(N[1,], type = "l", ylim = c(0, max(N)))
-    # for(i in 2:n_property) lines(N[i,], col = i)
-  # }
+  if(plot){
+    par(mfrow = c(1,2))
+    areas <- property_data$area_property
+    plot(N[1,]/areas[1], type = "l", ylim = c(0, 10))
+    for(i in 2:n_property) lines(N[i,]/areas[i], col = i)
+    plot(N[1,], type = "l", ylim = c(0, max(N)))
+    for(i in 2:n_property) lines(N[i,], col = i)
+  }
+
   p_check <- p_check[-1]
   colnames(N) <- 1:n_pp
 
@@ -370,7 +390,7 @@ simulate_dm <- function(
   X_p <- take |>
     select(starts_with("c_")) |>
     as.matrix()
-  X_p <- cbind(rep(1, nrow(X_p)), X_p)
+  # X_p <- cbind(rep(1, nrow(X_p)), X_p)
 
   # Generate start and end indices for previous surveys ---------------------
   take$start <- 0
@@ -450,7 +470,6 @@ simulate_dm <- function(
     n_property = n_property,
     n_county_units = nrow(county_units),
     n_prop = n_prop,
-    n_beta_p = 4,
     n_first_survey = length(which(take$order == 1)),
     n_not_first_survey = length(which(take$order != 1)),
     n_trap_snare = length(which(take$method %in% 4:5)),

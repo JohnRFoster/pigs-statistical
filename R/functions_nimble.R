@@ -106,18 +106,12 @@ split_out <- function(mcmc_out, state.col){
   return(out)
 }
 
-
-
-
-
-
-
 tau_2_sigma <- function(tau){
   1/sqrt(tau)
 }
 
 sigma_2_tau <- function(sigma){
-  1/sigam^2
+  1/sigma^2
 }
 
 sigma_2_var <- function(sigma){
@@ -161,16 +155,18 @@ calc_log_potential_area <- nimbleFunction(
       method = double(0)
   ){
     m <- method
-    if(m == 4 | m == 5){
+
+    if(m == 1){ # firearms
+      log_potential_area <- log_rho[m] +
+        log_effort_per -
+        log(1 + (p_unique[m] * n_trap_m1))
+    } else if(m == 2 | m ==3){ # fixed wing and helicopter
+      log_potential_area <- log_rho[m] + log_effort_per
+    } else if(m == 4 | m == 5){
       log_potential_area <- log_pi +
         (2 * (log_rho[m] + log_effort_per -
                 log(exp(log_gamma[m-3]) + effort_per))) +
-        log(1 + (p_unique[m] * n_trap_m1))
-    } else {
-      log_potential_area <- log_rho[m] +
-        log_effort_per -
-        # log(exp(log_gamma[m]) + effort_per) +
-        log(1 + (p_unique[m] * n_trap_m1))
+        log(1 + (p_unique[m-2] * n_trap_m1))
     }
     return(log_potential_area)
     returnType(double(0))
@@ -300,11 +296,11 @@ make_inits_function_dm <- function(inits_dir, constants, data, demographic_stoch
                       runif(1, 8, 15),
                       runif(1, 0.75, 1.5),
                       runif(1, 0.75, 1.5))),
-      beta_p = rnorm(4),
+      beta_p = matrix(15, 5, 3),
+      beta1 = rnorm(5),
       p_mu = p_mu,
-      alpha_phi = rnorm(max(constants$pH, na.rm = TRUE), 0, 0.01),
       logit_mean_phi = logit_mean_phi,
-      sigma_phi = sigma_phi,
+      tau_phi = sigma_2_tau(sigma_phi),
       # log_mean_lpy = log(mean_lpy),
       log_mean_ls = log(mean_ls),
       S = S,
@@ -313,4 +309,3 @@ make_inits_function_dm <- function(inits_dir, constants, data, demographic_stoch
     return(inits)
   }
 }
-
