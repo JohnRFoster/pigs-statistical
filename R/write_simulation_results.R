@@ -2,8 +2,10 @@ library(tidyverse)
 library(lubridate)
 library(nimble)
 
-top_dir <- "out/simulation/modifiedDM_betaSurvival"
-sim_runs <- list.files(top_dir)
+model_dir <- "modifiedDM_betaSurvival_dataByMethod"
+sim_dir <- "out/simulation"
+
+sim_runs <- list.files(file.path(sim_dir, model_dir))
 
 all_samples <- tibble()
 all_take <- tibble()
@@ -18,7 +20,7 @@ all_y <- tibble()
 all_area <- tibble()
 property_lookup <- tibble()
 
-first <- FALSE
+first <- TRUE
 # sim_runs <- sim_runs[1:2]
 
 if(first){
@@ -33,10 +35,10 @@ pb <- txtProgressBar(max = length(sim_runs), style = 3)
 
 for(i in seq_along(sim_runs)){
   # print(i)
-  run_experiments <- list.files(file.path(top_dir, sim_runs[i]))
+  run_experiments <- list.files(file.path(sim_dir, sim_runs[i]))
   for(j in seq_along(run_experiments)){
 
-    path <- file.path(top_dir, sim_runs[i], run_experiments[j])
+    path <- file.path(sim_dir, sim_runs[i], run_experiments[j])
     simulation_files <- list.files(path)
 
     rds <- read_rds(file.path(path, "posteriorEval.rds"))
@@ -176,7 +178,12 @@ for(i in seq_along(sim_runs)){
 }
 close(pb)
 
-ammend_prev <- function(df, name, first, file_name, path = "out/simulation"){
+analysis_dir <- "analysis/simulation"
+
+path <- file.path(analysis_dir, model_dir)
+if(!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
+
+ammend_prev <- function(df, name, first, file_name){
 
   dest <- file.path(path, file_name)
 
