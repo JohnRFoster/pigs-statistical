@@ -5,8 +5,8 @@ library(lubridate)
 library(nimble)
 
 
-n_nodes <- 20
-n_iter <- 80000
+n_nodes <- 5
+n_iter <- 8000
 n_chains <- 3
 
 n_pp <- 20
@@ -14,13 +14,17 @@ phi_mu <- 0.75
 psi_phi <- 3
 sigma_dem <- 0.25
 
-inits_dir <- "out"
+inits_dir <- NULL
 out_dir <- "out/simulation"
-model_dir <- "modifiedDM_betaSurvival"
+model_dir <- "modifiedDM_betaSurvival_dataByMethod"
 sim_dir <- file.path(out_dir, model_dir)
 past_reps <- list.files(sim_dir) |> as.numeric()
+if(length(past_reps) == 0){
+  rep_num <- 0
+} else {
+  rep_num <- max(past_reps) + 1
+}
 
-rep_num <- max(past_reps) + 1
 message("\nBegin simulations for replicate ", rep_num)
 
 dest <- file.path(out_dir, model_dir, rep_num)
@@ -48,12 +52,12 @@ custom_samplers <- tribble(
 )
 
 source("R/nimble_dm_2.R")
-source("R/fit_simulations_parallel.R")
+source("R/server_fit_simulations_parallel.R")
 
 message("\nStart Cluster")
 cl <- makeCluster(n_nodes)
 
-message("Begin Simulation")
+message("=== Begin Simulation ===")
 system.time(
   fit_simulations_parallel(
     cl = cl,
@@ -75,3 +79,7 @@ system.time(
 
 stopCluster(cl)
 
+message("Simulations complete!")
+message("Combing output and writing CSVs...")
+source("R/write_simulation_results.R")
+message("\nDONE!")
