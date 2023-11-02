@@ -3,9 +3,9 @@ library(lubridate)
 library(nimble)
 
 model_dir <- "modifiedDM_betaSurvival_dataByMethod"
-sim_dir <- "out/simulation"
+sim_dir <- file.path("out/simulation", model_dir)
 
-sim_runs <- list.files(file.path(sim_dir, model_dir))
+sim_runs <- list.files(sim_dir)
 
 all_samples <- tibble()
 all_take <- tibble()
