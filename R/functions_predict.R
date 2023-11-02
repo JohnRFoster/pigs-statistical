@@ -13,13 +13,21 @@ trap_snare_lpa <- function(log_rho, log_gamma, p_unique, effort_per, n_trap_m1){
     log(1 + (p_unique * n_trap_m1))
 }
 
-#'@description Calculate the potential search area from posterior samples when shooting methods (fixed wing, helicopter, hunting) are used
+#'@description Calculate the potential search area from posterior samples when aerial methods (fixed wing, helicopter) are used
+#'@param log_rho vector of mcmc samples for rho (log scale)
+#'@param effort_per the effort per trap/snare
+
+aerial_lpa <- function(log_rho, effort_per){
+  log_rho + log(effort_per)
+}
+
+#'@description Calculate the potential search area from posterior samples when firearms are used
 #'@param log_rho vector of mcmc samples for rho (log scale)
 #'@param p_unique vector of mcmc samples for p
 #'@param effort_per the effort per trap/snare
 #'@param n_trap_m1 the number of traps/snares used minus 1
 
-shooting_lpa <- function(log_rho, p_unique, effort_per, n_trap_m1){
+firearms_lpa <- function(log_rho, p_unique, effort_per, n_trap_m1){
   log_rho +
     log(effort_per) -
     log(1 + (p_unique * n_trap_m1))
@@ -38,14 +46,17 @@ lpa <- function(method, log_rho, log_gamma, p_unique, effort_per, n_trap_m1){
   log_potential_area <- matrix(NA, n_mcmc, n_reps)
   for(j in seq_along(method)){
     lr <- log_rho[,method[j]]
-    p <- p_unique[,method[j]]
     ep <- effort_per[j]
     tcm1 <- n_trap_m1[j]
-    if(method[j] == 4 | method[j] == 5){
+    if(method[j] == 1){
+      p <- p_unique[,method[j]]
+      log_potential_area[,j] <- firearms_lpa(lr, p, ep, tcm1)
+    } else if(method[j] == 2 | method[j] == 3){
+      log_potential_area[,j] <- aerial_lpa(lr, ep)
+    } else if(method[j] == 4 | method[j] == 5){
       lg <- log_gamma[,method[j]-3]
+      p <- p_unique[,method[j]-2]
       log_potential_area[,j] <- trap_snare_lpa(lr, lg, p, ep, tcm1)
-    } else {
-      log_potential_area[,j] <- shooting_lpa(lr, p, ep, tcm1)
     }
   }
   return(log_potential_area)
@@ -123,18 +134,24 @@ data_posteriors <- function(samples, constants, data){
     beta_p <- samples[, grep("beta_p", colnames(samples))]
 
     for(i in 1:n_survey){
-      if(method[i] == 4 | method[i] == 5){
-        log_potential_area[,i] <- trap_snare_lpa(
-          log_rho = log_rho[,method[i]],
-          log_gamma = log_gamma[,method[i]-3],
-          p_unique = p_unique[,method[i]],
+
+      if(method[i] == 1){
+        log_potential_area[, i] <- firearms_lpa(
+          log_rho = log_rho[, method[i]],
+          p_unique = p_unique[, method[i]],
           effort_per = effort_per[i],
           n_trap_m1 = n_trap_m1[i]
         )
-      } else {
-        log_potential_area[,i] <- shooting_lpa(
-          log_rho = log_rho[,method[i]],
-          p_unique = p_unique[,method[i]],
+      } else if(method[i] == 2 | method[i] == 3){
+        log_potential_area[, i] <- aerial_lpa(
+          log_rho = log_rho[, method[i]],
+          effort_per = effort_per[i]
+        )
+      } else if(method[i] == 4 | method[i] == 5){
+        log_potential_area[, i] <- trap_snare_lpa(
+          log_rho = log_rho[, method[i]],
+          log_gamma = log_gamma[, method[i] - 3],
+          p_unique = p_unique[, method[i] - 2],
           effort_per = effort_per[i],
           n_trap_m1 = n_trap_m1[i]
         )
