@@ -60,7 +60,7 @@ fit_simulations_parallel <- function(cl,
         psi_phi = psi_phi,
         area_property = round(runif(n(), 5, 250), 2),
         initial_abundnace = round(property_density * area_property),
-        n_sample_occasions = round(runif(n(), 2.5, 16.4))
+        n_sample_occasions = round(runif(n(), 2.5, 12.4))
       ) |>
       group_by(county) |>
       mutate(
