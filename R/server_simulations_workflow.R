@@ -5,13 +5,13 @@ library(lubridate)
 library(nimble)
 
 
-n_nodes <- 5
-n_iter <- 8000
+n_nodes <- 25
+n_iter <- 80000
 n_chains <- 3
 
 n_pp <- 20
-phi_mu <- 0.75
-psi_phi <- 3
+phi_mu <- 0.78
+psi_phi <- 6
 sigma_dem <- 0.25
 
 inits_dir <- NULL
@@ -20,7 +20,7 @@ model_dir <- "modifiedDM_betaSurvival_dataByMethod"
 sim_dir <- file.path(out_dir, model_dir)
 past_reps <- list.files(sim_dir) |> as.numeric()
 if(length(past_reps) == 0){
-  rep_num <- 0
+  rep_num <- 1
 } else {
   rep_num <- max(past_reps) + 1
 }
