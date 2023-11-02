@@ -245,11 +245,6 @@ beta1_recovery <- beta1_long |>
   ungroup() |>
   recovered()
 
-out_dir <- "out/simulation"
-
-table(beta1_recovery$parameter_recovered)
-sum(beta1_recovery$parameter_recovered) / nrow(beta1_recovery)
-
 beta1_residual <- beta1_long |>
   left_join(all_beta_p) |>
   mutate(value = value - actual) |>
@@ -257,8 +252,8 @@ beta1_residual <- beta1_long |>
   my_summary() |>
   ungroup()
 
-write_csv(beta1_recovery, file.path(out_dir, "summaryRecovered_captureIntercept.csv"))
-write_csv(beta1_residual, file.path(out_dir, "summaryResidual_captureIntercept.csv"))
+write_csv(beta1_recovery, file.path(path, "summaryRecovered_captureIntercept.csv"))
+write_csv(beta1_residual, file.path(path, "summaryResidual_captureIntercept.csv"))
 message("capture intercepts done")
 
 ## capture probability covariates ------
@@ -281,8 +276,8 @@ beta_p_residual <- beta_p_long |>
   my_summary() |>
   ungroup()
 
-write_csv(beta_p_recovery, file.path(out_dir, "summaryRecovered_captureCovariates.csv"))
-write_csv(beta_p_residual, file.path(out_dir, "summaryResidual_captureCovariates.csv"))
+write_csv(beta_p_recovery, file.path(path, "summaryRecovered_captureCovariates.csv"))
+write_csv(beta_p_residual, file.path(path, "summaryResidual_captureCovariates.csv"))
 message("capture covariates done")
 
 ## gamma ------
@@ -312,8 +307,8 @@ gamma_residual <- gamma_long |>
   my_summary() |>
   ungroup()
 
-write_csv(gamma_recovery, file.path(out_dir, "summaryRecovered_saturationConstant.csv"))
-write_csv(gamma_residual, file.path(out_dir, "summaryResidual_saturationConstant.csv"))
+write_csv(gamma_recovery, file.path(path, "summaryRecovered_saturationConstant.csv"))
+write_csv(gamma_residual, file.path(path, "summaryResidual_saturationConstant.csv"))
 message("saturation constant done")
 
 ## rho ------
@@ -340,8 +335,8 @@ rho_residual <- rho_long |>
   my_summary() |>
   ungroup()
 
-write_csv(rho_recovery, file.path(out_dir, "summaryRecovered_searchArea.csv"))
-write_csv(rho_residual, file.path(out_dir, "summaryResidual_searchArea.csv"))
+write_csv(rho_recovery, file.path(path, "summaryRecovered_searchArea.csv"))
+write_csv(rho_residual, file.path(path, "summaryResidual_searchArea.csv"))
 message("search area done")
 
 ## unique area ------
@@ -368,8 +363,8 @@ p_mu_residual <- p_mu_long |>
   my_summary() |>
   ungroup()
 
-write_csv(p_mu_recovery, file.path(out_dir, "summaryRecovered_uniqueArea.csv"))
-write_csv(p_mu_residual, file.path(out_dir, "summaryResidual_uniqueArea.csv"))
+write_csv(p_mu_recovery, file.path(path, "summaryRecovered_uniqueArea.csv"))
+write_csv(p_mu_residual, file.path(path, "summaryResidual_uniqueArea.csv"))
 message("unique area done")
 
 ## litter size ------
@@ -392,8 +387,8 @@ ls_residual <- ls_long |>
   my_summary() |>
   ungroup()
 
-write_csv(ls_recovery, file.path(out_dir, "summaryRecovered_litterSize.csv"))
-write_csv(ls_residual, file.path(out_dir, "summaryResidual_litterSize.csv"))
+write_csv(ls_recovery, file.path(path, "summaryRecovered_litterSize.csv"))
+write_csv(ls_residual, file.path(path, "summaryResidual_litterSize.csv"))
 message("liter size done")
 
 ## survival ------
@@ -433,8 +428,8 @@ psi_phi_residual <- psi_phi_long |>
   my_summary() |>
   ungroup()
 
-write_csv(bind_rows(phi_recovery, psi_phi_recovery), file.path(out_dir, "summaryRecovered_survial.csv"))
-write_csv(bind_rows(phi_residual, psi_phi_residual), file.path(out_dir, "summaryResidual_survial.csv"))
+write_csv(bind_rows(phi_recovery, psi_phi_recovery), file.path(path, "summaryRecovered_survial.csv"))
+write_csv(bind_rows(phi_residual, psi_phi_residual), file.path(path, "summaryResidual_survial.csv"))
 message("survival done")
 
 
@@ -460,7 +455,7 @@ xn_posterior <- xn |>
             high_density = quantile(estimated_density, 0.975)) |>
   ungroup()
 
-write_csv(xn_posterior, file.path(out_dir, "summaryPropertyAbundance.csv"))
+write_csv(xn_posterior, file.path(path, "summaryPropertyAbundance.csv"))
 message("posterior abundance done")
 
 xn_error <- xn |>
@@ -482,7 +477,7 @@ xn_error <- xn |>
   mutate(delta = PPNum - lag(PPNum)) |>
   ungroup()
 
-write_csv(xn_error, file.path(out_dir, "PropertyAbundanceMetrics.csv"))
+write_csv(xn_error, file.path(path, "PropertyAbundanceMetrics.csv"))
 message("abundance metrics done")
 
 posterior_take <- all_y |>
@@ -495,6 +490,6 @@ posterior_take <- all_y |>
   ungroup() |>
   left_join(all_take)
 
-write_csv(posterior_take, file.path(out_dir, "summaryPredictedTake.csv"))
+write_csv(posterior_take, file.path(path, "summaryPredictedTake.csv"))
 message("posterior take done")
 
