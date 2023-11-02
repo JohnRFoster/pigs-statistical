@@ -1,7 +1,7 @@
 run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
                                 model_inits, n_iter, params_check, state.col,
                                 model_flags, monitors_add = NULL, custom_samplers = NULL,
-                                effective_size = 5000,
+                                effective_size = 5000, inits_dir = NULL,
                                 max_iter = NULL, max_psrf = 100,
                                 calculate = TRUE, use_conjugacy = TRUE,
                                 resetMV = FALSE,
@@ -23,14 +23,15 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
     "monitors_add",
     "params_check",
     "custom_samplers",
-    "model_flags"
+    "model_flags",
+    "inits_dir"
   )
 
   clusterExport(cl, export, envir = environment())
 
   for(i in seq_along(cl)){
     set.seed(i)
-    init <- model_inits()
+    init <- model_inits(model_data, model_constants, inits_dir)
     clusterExport(cl[i], "init", envir = environment())
   }
 
@@ -58,6 +59,13 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
       calculate = calculate
     )
 
+    for(i in 1:model_constants$n_survey){
+      N_model <- Rmodel$N[model_constants$p_property_idx[i], model_constants$p_pp_idx[i]]
+      n <- N_model - model_data$y_sum[i]
+      if(n < 0){
+        Rmodel$N[model_constants$p_property_idx[i], model_constants$p_pp_idx[i]] <- N_model + n^2
+      }
+    }
 
     if(!calculate){
       calc <- Rmodel$calculate()
@@ -79,7 +87,18 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
         mcmcConf$addSampler(node, type)
       }
     }
-    # mcmcConf <- configureHMC(Rmodel)
+
+    for(i in 1:5){
+      node <- paste0("beta_p[", i, ", ", 1:model_constants$m_p, "]")
+      node <- c(paste0("beta1[", i, "]"), node)
+      mcmcConf$removeSampler(node)
+      mcmcConf$addSampler(node, "AF_slice")
+    }
+    # for(i in 4:5){
+    #   node <- c(paste0("log_rho[", i, "]"), paste0("log_gamma[", i-3, "]"))
+    #   mcmcConf$removeSampler(node)
+    #   mcmcConf$addSampler(node, "AF_slice")
+    # }
 
     if(!is.null(monitors_add)){
       mcmcConf$addMonitors(monitors_add)
@@ -167,11 +186,11 @@ run_nimble_parallel <- function(cl, model_code, model_data, model_constants,
 
     diagnostic <- continue_mcmc(mcmc, params_check, effective_size, max_psrf)
 
-    if(c %% 10 == 0){
-      message("Checking convergence on all iterations...")
-      mm <- get_mcmc_chunks(path = dest, start = 1)
-      check_mm <- continue_mcmc(mm$params, params_check, effective_size, max_psrf)
-    }
+    # if(c %% 10 == 0){
+    #   message("Checking convergence on all iterations...")
+    #   mm <- get_mcmc_chunks(path = dest, start = 1)
+    #   check_mm <- continue_mcmc(mm$params, params_check, effective_size, max_psrf)
+    # }
 
     # save output if requested
     save_samples(save_iter, resetMV, state.col)
