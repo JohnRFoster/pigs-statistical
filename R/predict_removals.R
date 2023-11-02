@@ -1,25 +1,26 @@
+library(targets)
+library(tidyverse)
+library(lubridate)
+library(config)
+library(spdep)
+library(nimble)
+setwd("C:/Users/John.Foster/OneDrive - USDA/Desktop/fosteR/pigs-statistical")
+source("R/functions_predict.R")
+source("R/functions_nimble.R")
 
-n_fx <- 3
+n_fx <- 1
 n_reps <- 3
 
-scenarios <- data.frame(t1 = c("N", "R"))
-if(n_fx > 1){
-  for(i in 2:n_fx){
-    scenarios <- cbind(scenarios, c("N", "R"))
-  }
-  colnames(scenarios) <- paste0("t", 1:n_fx)
-  scenarios <- expand.grid(scenarios)
-}
-scenarios <- t(scenarios)
+removal_effort <- seq(0, 1, by = 0.25)
 
-rep_num <- 1 # starting with 13 there are 50 properties
+rep_num <- 2
 out_dir <- "out/simulation"
 model_dir <- "DM_recruitData_varyingEffort"
 likelihood <- "poisson"
 mcmc_config <- "customMCMC_conjugate"
 rep <- paste0("simulation_", rep_num)
 
-dest <- file.path(out_dir, model_dir, likelihood, mcmc_config, paste0("simulation_", 1))
+dest <- file.path(out_dir, model_dir, likelihood, mcmc_config, paste0("simulation_", rep_num))
 rds <- read_rds(file.path(dest, "posterior.rds"))
 samples <- rds$samples
 sim_data <- read_rds(file.path(dest, "sim_data.rds"))
@@ -51,8 +52,9 @@ property_df <- tibble(
 
 take <- sim_data$take
 
+draws <- sample.int(nrow(samples), 500, replace = TRUE)
 
-n_samples <- samples[, grep("xn[", colnames(samples), fixed = TRUE)]
+n_samples <- samples[draws, grep("xn[", colnames(samples), fixed = TRUE)]
 n_mcmc <- nrow(n_samples)
 
 pattern <- "(?<!beta_)p\\[\\d*\\]"
@@ -60,157 +62,143 @@ p_detect <- str_detect(colnames(samples), pattern)
 p <- samples[,which(p_detect)]
 
 mu_phi <- samples[,"logit_mean_phi"]
-sigma_phi <- samples[,"sigma_phi"]
-mean_ls <- samples[,"mean_ls"]
+sigma_phi <- sigma_2_tau(samples[,"tau_phi"])
+mean_ls <- exp(samples[,"log_mean_ls"])
 zeta <- mean_ls*28*1/365
 
 log_rho <- samples[, grep("log_rho", colnames(samples))]
 log_gamma <- samples[, grep("log_gamma", colnames(samples))]
 p_unique <- ilogit(samples[, grep("p_mu", colnames(samples))])
 beta_p <- samples[, grep("beta_p", colnames(samples))]
+beta1 <- samples[, grep("beta1", colnames(samples))]
 
 X <- unique(X_p)
 
-# storage
-N_predict <- tibble()
-Y_predict <- tibble()
 
-get_e <- function(e){
-  lapply(m, function(i){
-    E |> filter(method == i)
-  }) |>
-    bind_rows() |>
-    pull(e)
+
+
+# determine the initial condition
+# if the starting primary period has an observation, use the posterior for that PP
+# otherwise, use the latest forecast
+
+
+# get a specific date
+get_date <- function(pp_filter){
+  time_lookup |>
+    filter(pp == pp_filter) |>
+    pull(date) |>
+    as.character()
 }
 
-for(s in 1:nrow(scenarios)){
-  scenario_name <- as.vector(scenarios[,s])
-  for(i in 1:n_property){
+effort_quants <- take |>
+  group_by(property, method, area_property) |>
+  reframe(
+    effort_per = quantile(effort_per, removal_effort), q = removal_effort,
+    trap_count = quantile(trap_count, removal_effort), q = removal_effort) |>
+  ungroup() |>
+  suppressMessages()
 
-    prop <- property_df |>
-      filter(property == i,
-             timestep == 1)
+n_reps <- take |>
+  select(property, PPNum) |>
+  group_by(property, PPNum) |>
+  tally() |>
+  group_by(property) |>
+  reframe(n_reps = quantile(n, removal_effort), q = removal_effort) |>
+  mutate(n_reps = round(n_reps))
 
-    observations <- sample_occasions |>
-      filter(property == i)
-
-    start_pp <- min(observations$PPNum)
-    end_pp <- max(observations$PPNum)
-
-    n_id <- min(observations$n_id)
-    n_node <- paste0("xn[", n_id, "]")
-    N <- n_samples[,grep(n_node, colnames(n_samples), fixed = TRUE)]
-
-    take_property <- take |>
-      filter(property == i)
-
-    E <- take_property |>
-      group_by(method, area_property) |>
-      summarise(effort_per = mean(effort_per),
-                trap_count = mean(trap_count)) |>
-      ungroup()
-
-    c <- take_property$county[1]
-
-    for(t in start_pp:end_pp){
-      for(fx in 1:n_fx){
+#
 
 
-        # do we remove pigs?
-        if(scenario_name[fx] == "R"){
+i <- 1
+for(i in 1:n_property){
 
-          # removal methods based on frequency of use in a given property
-          m <- sample(take_property$method, n_reps, replace = TRUE)
+  message("Forecasting property ", i, "/", n_property)
 
-          # extract effort attributes from property
-          ep <- get_e("effort_per")
-          tc_m1 <- get_e("trap_count") - 1
+  observations <- sample_occasions |>
+    filter(property == i)
 
-          # the search area given method and effort
-          log_potential_area <- calc_log_potential_area(
-            method = m,
-            log_rho = log_rho,
-            log_gamma = log_gamma,
-            p_unique = p_unique,
-            effort_per = ep,
-            n_trap_m1 = tc_m1
-          )
+  start_pp <- min(observations$PPNum)
+  end_pp <- max(observations$PPNum)
+  fx_pp_seq <- start_pp:(end_pp + n_fx)
 
-          # probability of capture for each pass
-          p <- calc_p(
-            X = X[c,],
-            beta = beta_p,
-            log_potential_area = log_potential_area,
-            area_property = E$area_property[1]
-          )
+  fx_date_seq <- seq.Date(
+    from = ymd("2023-09-01"),
+    length.out = length(fx_pp_seq),
+    by = "4 week")
 
-          # remove
-          y <- matrix(NA, n_mcmc, n_reps)
-          for(j in seq_len(n_reps)){
-            y[,j] <- rpois(n_mcmc, N * p[,j])
-            y_rep <- tibble(
-              y = y[,j],
-              property = i,
-              PPNum = t,
-              method = m[j],
-              effort_per = ep,
-              trap_count = tc_m1,
-              rep = j
-            )
-            Y_predict <- bind_rows(Y_predict, y_rep)
-          }
+  # need a timestep to PP/date lookup table for saving
+  time_lookup <- tibble(
+    timestep = seq_along(fx_pp_seq),
+    pp = fx_pp_seq,
+    date = fx_date_seq
+  )
 
-          N <- N - rowSums(y)
-        }
+  effort_property <- effort_quants |>
+    filter(property == i)
 
-        phi <- ilogit(rnorm(n_mcmc, mu_phi, sigma_phi))
-        S <- rbinom(n_mcmc, N, phi)
-        R <- rpois(n_mcmc, N * zeta)
-        N <- S + R
+  reps_property <- n_reps |>
+    filter(property == i)
 
-        # storage
-        N_predict <- bind_rows(N_predict,
-                               tibble(
-                                 property = i,
-                                 start_pp = t, # the PP we started from (before removals, if applicable)
-                                 PPNum = t+fx, # the PP we are forecasting into
-                                 horizon = fx, # the number of PPs being forecasted across
-                                 removal = scenario_name[fx],
-                                 S = S,
-                                 R = R,
-                                 N = N
-                               ))
-      } # fx
+  c <- take |>
+    filter(property == i) |>
+    slice(1) |>
+    pull(county)
 
+  methods <- take |>
+    filter(property == i) |>
+    pull(method)
 
+  pb <- txtProgressBar(min = start_pp, max = end_pp, style = 3)
 
+  for(t in start_pp:end_pp){
 
-
-
-
+    # if the forecast issue date has an observation, use the abundance posterior
+    # otherwise, use the latest forecast
+    # need to keep track of effort scenarios to propagate how switching between
+    # effort levels affects abundance
+    obs <- t %in% observations$PPNum
+    if(obs){
+      IC <- get_IC_posterior(t, observations, n_samples)
+    } else {
+      prev_effort <- "prev_effort_scenario" %in% colnames(new_abundance)
+      IC <- get_IC_forecast(t, observations, forecast_ens, prev_effort)
     }
-  }
+
+    phi <- ilogit(rnorm(n_mcmc, mu_phi, sigma_phi)) # draw survival
+    start_date <- get_date(t)
+    fx_date <- get_date(t+1)
+
+    # forecast new abundance
+    new_abundance <- sim_N(IC, start_date, fx_date, phi, zeta)
+
+    # removal effort scenarios
+    y_ens_store <- tibble()
+    groups <- unique(new_abundance$id)
+    for(j in seq_along(groups)){
+      for(k in seq_along(removal_effort)){
+
+        y_attr <- remove(i, t, j, removal_effort[k], effort_property, reps_property, methods,
+                         log_rho, log_gamma, p_unique, X[c,], beta1, beta_p, new_abundance)
+        y_ens_store <- bind_rows(y_ens_store, y_attr)
+
+      } # k
+    } # j
+
+    forecast_ens <- abundance_m_take(t, obs, new_abundance, y_ens_store)
+
+    fx_dir <- file.path(dest, "forecast", paste0("property_", i))
+    if(!dir.exists(fx_dir)) dir.create(fx_dir, recursive = TRUE)
+
+    fx_file <- file.path(fx_dir, paste0(start_date, "_abundance.csv"))
+    write_csv(forecast_ens, fx_file)
+
+    y_file <- file.path(fx_dir, paste0(start_date, "_takeByMethod.csv"))
+    write_csv(y_ens_store, y_file)
+
+    setTxtProgressBar(pb, t)
+
+  } # t
+  close(pb)
 }
 
-samps <- rds$samples[, grep("xn[", colnames(rds$samples), fixed = TRUE)]
-N <- left_join(sim_data$county_to_property, sim_data$N)$abundance
 
-# samps <- rds$y
-# N <- sim_data$take$take
-
-N1 <- apply(samps, 2, quantile, 0.025)
-N2 <- apply(samps, 2, quantile, 0.975)
-M <- apply(samps, 2, quantile, 0.5)
-tibble(
-  N1 = N1,
-  N2 = N2,
-  Predicted = M,
-  Known = N
-) |>
-  ggplot() +
-  aes(x = Known, y = Predicted, ymin = N1, ymax = N2) +
-  # geom_linerange() +
-  geom_point() +
-  geom_smooth(method = "lm") +
-  geom_abline(intercept = 0, slope = 1, color = "red") +
-  theme_bw()
