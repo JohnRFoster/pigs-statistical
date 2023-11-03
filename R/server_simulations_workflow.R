@@ -3,6 +3,7 @@ library(targets)
 library(tidyverse)
 library(lubridate)
 library(nimble)
+library(config)
 
 
 n_nodes <- 25
@@ -12,11 +13,14 @@ n_chains <- 3
 n_pp <- 20
 phi_mu <- 0.78
 psi_phi <- 6
-sigma_dem <- 0.25
+sigma_dem <- 2
 
-inits_dir <- NULL
-out_dir <- "out/simulation"
-model_dir <- "modifiedDM_betaSurvival_dataByMethod"
+config <- config::get()
+inits_dir <- config$init_dir
+out_dir <- config$out_dir
+model_dir <- config$model_dir
+
+
 sim_dir <- file.path(out_dir, model_dir)
 past_reps <- list.files(sim_dir) |> as.numeric()
 if(length(past_reps) == 0){
