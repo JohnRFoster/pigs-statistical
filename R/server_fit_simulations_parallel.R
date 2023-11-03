@@ -216,7 +216,6 @@ fit_simulations_parallel <- function(cl,
 
     samples_draw <- as.data.frame(samples_burn_mat[draws, ])
 
-
     source("R/functions_predict.R")
     post <- data_posteriors(samples_draw, constants, data)
 
