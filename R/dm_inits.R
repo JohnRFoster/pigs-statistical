@@ -5,7 +5,7 @@ inits <- function(data, constants, dir = NULL){
       beta1 <- rnorm(n_method, -1, 0.25)
       beta_p <- matrix(rnorm(m_p*n_method, 0, 0.1), n_method, m_p)
       p_mu <- rnorm(3)
-      log_gamma <- log(runif(2, 0.5, 2))
+      log_gamma <- log(runif(2, 0.1, 2))
       log_rho <- log(
         c(runif(1, 0.1, 3), runif(1, 8, 15), runif(1, 20, 25), runif(1, 0.75, 1.5), runif(1, 0.75, 1.5))
       )
