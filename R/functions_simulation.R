@@ -62,16 +62,7 @@ simulate_dm <- function(
   # method <- sample.int(5, 1, prob = method_lookup$freq)
   method <- sample.int(5, 1)
 
-  data_timestep <- read_csv("data/insitu/MIS_2020_timesteps.csv")
-  effort_data_lookup <- tibble(
-    method_name = c("TRAPS, CAGE", "FIREARMS", "SNARE", "HELICOPTER", "FIXED WING"),
-    method = c(5, 1, 4, 3, 2)
-  )
-
-  effort_data <- data_timestep |>
-    select(method, effort, trap_count) |>
-    rename(method_name = method) |>
-    left_join(effort_data_lookup)
+  effort_data <- read_csv("data/insitu/effort_data.csv")
 
   generate_take_data <- function(m, effort_data){
     x <- effort_data |>
