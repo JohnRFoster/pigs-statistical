@@ -160,7 +160,7 @@ calc_log_potential_area <- nimbleFunction(
       log_potential_area <- log_rho[m] +
         log_effort_per -
         log(1 + (p_unique[m] * n_trap_m1))
-    } else if(m == 2 | m ==3){ # fixed wing and helicopter
+    } else if(m == 2 | m == 3){ # fixed wing and helicopter
       log_potential_area <- log_rho[m] + log_effort_per
     } else if(m == 4 | m == 5){
       log_potential_area <- log_pi +
