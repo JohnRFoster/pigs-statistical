@@ -1,54 +1,7 @@
 default:
-  out_dir: "out/test"
-  run_parallel: TRUE
-  n_iter: 50000
+  out_dir: "out/simulation"
+  analysis_dir: "analysis/simulation"
+  model_dir: "modifiedDM_betaSurvival_dataJoint"
+  first: TRUE
   init_dir: NULL
-  likelihood: "nb"
-  model_file: "R/nimble_dynamic.R"
 
-exponential:
-  model_dir: "exponential"
-  process_type: "exponential"
-
-ricker:
-  model_dir: "ricker"
-  process_type: "ricker"
-  inits_dir: "exponential"
-
-gompertz:
-  model_dir: "gompertz"
-  process_type: "gompertz"
-  inits_dir: "ricker"
-
-jamiesonBrooks:
-  model_dir: "jamiesonBrooks"
-  process_type: "jamiesonBrooks"
-  inits_dir: "ricker"
-  params_check : !expr c("beta_p", "log_rho", "log_gamma", "p_unique", "log_r_mu", "tau_proc", "beta_r")
-
-dennisTaper:
-  inherits: "jamiesonBrooks"
-  model_dir: "dennisTaper"
-  process_type: "dennisTaper"
-
-dm:
-  out_dir: "out/test"
-  model_dir: "dm2"
-  process_type: "static"
-  inits_dir: "dm"
-  params_check : !expr c("beta_p", "log_rho", "log_gamma", "p_unique", "log_zeta", "logit_phi", "size")
-  spatial: FALSE
-  property_obs_effect: FALSE
-  model_file: "R/nimble_dm_2.R"
-
-dm_zeta_pp:
-  inherits: dm
-  process_type: "zeta_pp"
-  params_check : !expr c("beta_p", "log_rho", "log_gamma", "p_unique", "log_zeta",
-    "log_zeta_global", "logit_phi", "size", "tau_zeta")
-
-dm_phi_pp:
-  inherits: dm
-  process_type: "phi_pp"
-  params_check : !expr c("beta_p", "log_rho", "log_gamma", "p_unique", "log_zeta",
-    "logit_phi_global", "logit_phi", "size", "tau_phi")
