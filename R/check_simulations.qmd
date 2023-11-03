@@ -25,7 +25,7 @@ library(nimble)
 library(coda)
 library(mgcv)
 source("../R/functions_nimble.R")
-file_dir <- "../analysis/simulation/modifiedDM_betaSurvival_dataByMethod"
+file_dir <- "../analysis/simulation/modifiedDM_betaSurvival_dataJoint"
 df <- read_csv(file.path(file_dir, "summaryRecovered_litterSize.csv"))
 
 n_experiments <- length(unique(df$simulation))
@@ -504,7 +504,7 @@ xx = summary(lm(med_abundance ~ abundance, data = df))
 
 df |> 
   ggplot() +
-  aes(y = med_abundance, x = abundance, color = simulation) +
+  aes(y = med_abundance, x = abundance) +
   geom_point(size = 0.5) +
   geom_smooth(method = "lm") +
   geom_abline(intercept = 0, slope = 1) +
