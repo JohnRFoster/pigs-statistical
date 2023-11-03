@@ -9,7 +9,6 @@ analysis_dir <- config$analysis_dir
 model_dir <- config$model_dir
 first <- config$first
 
-model_dir <- "modifiedDM_betaSurvival_dataByMethod"
 sim_dir <- file.path(out_dir, model_dir)
 
 if(first){
@@ -46,7 +45,7 @@ for(i in seq_along(sim_runs)){
     simulation_files <- list.files(path)
 
     rds <- read_rds(file.path(path, "posteriorEval.rds"))
-    bad_mcmc <- rds$bad_mcmc
+    bad_mcmc <- rds$bad_mcmc | any(rds$psrf > 2)
     task_id <- rds$task_id
     already_collated <- task_id %in% prev_tasks
 
