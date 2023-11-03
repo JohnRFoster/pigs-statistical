@@ -49,7 +49,7 @@ simulate_dm <- function(
             runif(1, 5, 20),   # helicopter
             runif(1, 0.5, 2),  # snare; gamma[1], p_mu[2]
             runif(1, 0.5, 2)), # traps; gamma[2], p_mu[3]
-    gamma = c(0.5, 0.01, 0.01, runif(1, 0.5, 4), runif(1, 0.5, 4))
+    gamma = c(0, 0, 0, rgamma(1, 7.704547, 4.41925), rgamma(1, 3.613148, 3.507449))
   )
 
   log_rho <- log(method_lookup$rho)
@@ -77,11 +77,12 @@ simulate_dm <- function(
     x <- effort_data |>
       filter(method == m)
 
-    effort <- sample(x$effort, 1)
-    trap_count <- sample(x$trap_count, 1)
-    effort_per <- effort / trap_count
+    tc <- sample(x$trap_count, 1)
+    y <- x |> filter(trap_count == tc)
+    e <- sample(y$effort, 1)
+    effort_per <- e / tc
 
-    tibble(effort_per = effort_per, trap_count = trap_count)
+    tibble(effort_per = effort_per, trap_count = tc)
   }
 
   # storage
