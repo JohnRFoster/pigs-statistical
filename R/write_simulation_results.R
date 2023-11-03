@@ -2,10 +2,23 @@ library(tidyverse)
 library(lubridate)
 library(nimble)
 
-model_dir <- "modifiedDM_betaSurvival_dataByMethod"
-sim_dir <- file.path("out/simulation", model_dir)
+config <- config::get()
+inits_dir <- config$init_dir
+out_dir <- config$out_dir
+analysis_dir <- config$analysis_dir
+model_dir <- config$model_dir
+first <- config$first
 
-sim_runs <- list.files(sim_dir)
+model_dir <- "modifiedDM_betaSurvival_dataByMethod"
+sim_dir <- file.path(out_dir, model_dir)
+
+if(first){
+  prev_tasks <- "none"
+} else {
+  prev_tasks <- read_csv(file.path(analysis_dir, model_dir, "KnownMethodParameters.csv")) |>
+    pull(simulation) |>
+    unique()
+}
 
 all_samples <- tibble()
 all_take <- tibble()
@@ -20,17 +33,8 @@ all_y <- tibble()
 all_area <- tibble()
 property_lookup <- tibble()
 
-first <- TRUE
+sim_runs <- list.files(sim_dir)
 # sim_runs <- sim_runs[1:2]
-
-if(first){
-  prev_tasks <- "none"
-} else {
-  prev_tasks <- read_csv("out/simulation/KnownMethodParameters.csv") |>
-    pull(simulation) |>
-    unique()
-}
-
 pb <- txtProgressBar(max = length(sim_runs), style = 3)
 
 for(i in seq_along(sim_runs)){
@@ -178,8 +182,6 @@ for(i in seq_along(sim_runs)){
 }
 close(pb)
 
-analysis_dir <- "analysis/simulation"
-
 path <- file.path(analysis_dir, model_dir)
 if(!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
 
@@ -221,11 +223,6 @@ select_pivot_longer <- function(df, node){
                  names_to = "node")
 }
 
-beta1_long <- all_samples |>
-  select_pivot_longer("beta1") |>
-  mutate(method_idx = as.numeric(str_extract(node, "(?<=\\[)\\d")),
-         position = 1)
-
 recovered <- function(df){
   df |> mutate(parameter_recovered = if_else(actual >= low & actual <= high, 1, 0))
 }
@@ -238,6 +235,12 @@ my_summary <- function(df){
 }
 
 ## capture probability intercepts ------
+beta1_long <- all_samples |>
+  select_pivot_longer("beta1") |>
+  mutate(method_idx = as.numeric(str_extract(node, "(?<=\\[)\\d")),
+         position = 1)
+
+
 beta1_recovery <- beta1_long |>
   group_by(simulation, node, method_idx, position) |>
   my_summary() |>
@@ -341,8 +344,10 @@ message("search area done")
 
 ## unique area ------
 pH <- all_methods |>
+  filter(idx %in% c(1, 4, 5)) |>
   select(idx, p_unique, method, simulation) |>
-  rename(actual = p_unique)
+  rename(actual = p_unique) |>
+  mutate(idx = if_else(idx == 1, idx, idx - 2))
 
 p_mu_long <- all_samples |>
   select_pivot_longer("p_mu[") |>
@@ -392,7 +397,7 @@ write_csv(ls_residual, file.path(path, "summaryResidual_litterSize.csv"))
 message("liter size done")
 
 ## survival ------
-actual <- 0.75
+actual <- 0.78
 phi_long <- all_samples |>
   select_pivot_longer("phi_mu")
 
@@ -410,7 +415,7 @@ phi_residual <- phi_long |>
   my_summary() |>
   ungroup()
 
-actual <- 3
+actual <- 6
 psi_phi_long <- all_samples |>
   select_pivot_longer("psi_phi")
 
