@@ -210,6 +210,7 @@ ammend_prev(all_pop_growth, "all_pop_growth", first, "KnownPopulationGrowth.csv"
 ammend_prev(all_methods, "all_methods", first, "KnownMethodParameters.csv")
 ammend_prev(all_properties, "all_properties", first, "Properties.csv")
 ammend_prev(property_lookup, "property_lookup", first, "propertyLookup.csv")
+ammend_prev(all_area, "all_area", first, "PredictedAreaSearched.csv")
 
 X <- all_take |>
   select(simulation, county, property, area_property, contains("c_")) |>
@@ -232,6 +233,8 @@ my_summary <- function(df){
               med = quantile(value, 0.5),
               high = quantile(value, 0.975))
 }
+
+
 
 ## capture probability intercepts ------
 beta1_long <- all_samples |>
@@ -497,3 +500,16 @@ posterior_take <- all_y |>
 write_csv(posterior_take, file.path(path, "summaryPredictedTake.csv"))
 message("posterior take done")
 
+
+
+
+area_summary <- all_area |>
+  pivot_longer(cols = -c(simulation),
+               names_to = "n_id") |>
+  filter(!is.na(value)) |>
+  group_by(simulation, n_id) |>
+  my_summary()
+
+property_attributes <- left_join(property_lookup, all_properties)
+
+left_join(a) |> filter(simulation == "1_10876", n_id %in% 1:10)
