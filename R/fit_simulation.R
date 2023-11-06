@@ -12,11 +12,11 @@ library(rgdal)
 
 setwd("C:/Users/John.Foster/OneDrive - USDA/Desktop/fosteR/pigs-statistical/")
 
-run_parallel <- TRUE
+run_parallel <- FALSE
 rep_num <- 1
 # set.seed(rep_num)
 out_dir <- "out/simulation"
-model_dir <- "modifiedDM_betaSurvival_dataByMethod"
+model_dir <- "modifiedDM_betaSurvival_dataJoint"
 likelihood <- "poisson"
 mcmc_config <- "customMCMC"
 rep <- paste0("simulation_", rep_num)
@@ -26,8 +26,8 @@ if(!dir.exists(dest)) dir.create(dest, recursive = TRUE, showWarnings = FALSE)
 
 message("Writing samples to: ", dest)
 
-phi_mu <- 0.75
-psi_phi <- 3
+phi_mu <- 0.78
+psi_phi <- 5
 sigma_dem <- 0.25
 
 a_phi <- phi_mu * psi_phi
@@ -38,16 +38,14 @@ hist(rbeta(10000, a_phi, b_phi))
 property_attributes <- expand_grid(
   property_density = round(runif(5, 0.3, 6), 2),
   proportion_county_surveyed = seq(0.1, 0.9, length.out = 5)
-  # survival_rate = seq(0.6, 0.95, length.out = 4)
 ) |>
   mutate(
     county = as.numeric(as.factor(proportion_county_surveyed)),
-    # survival_rate = round(ilogit(rnorm(n(), logit_mean_phi, sigma_phi)), 3),
     phi_mu = phi_mu,
     psi_phi = psi_phi,
     area_property = round(runif(n(), 5, 250), 2),
     initial_abundnace = round(property_density * area_property),
-    n_sample_occasions = round(runif(n(), 2.5, 16.4))
+    n_sample_occasions = round(runif(n(), 2.5, 12.4))
   ) |>
   group_by(county) |>
   mutate(
@@ -226,22 +224,52 @@ if(run_parallel){
   Cmodel <- compileNimble(Rmodel)
   Cmcmc <- compileNimble(Rmcmc)
 
-  n_iter <- 5
+  n_iter <- 15000
   n_chains <- 1
 
   samples <- runMCMC(
     Cmcmc,
     niter = n_iter,
     nchains = n_chains,
-    # thin = 5,
+    nburnin = n_iter / 4,
     samplesAsCodaMCMC = TRUE
   )
 
-  params <- split_out(samples, "xn")
-  params2 <- split_out(params$params, "pop_growth")
-  params3 <- split_out(params2$params, "phi")
-  params4 <- split_out(params3$params, "log_lambda_1")
-  plot(params4$params)
+  j <- unlist(lapply(params_check, function(x) grep(x, colnames(samples))))
+  params <- as.matrix(samples)[,j]
+
+  par(mfrow = c(2, 2))
+  for(i in 1:2){
+    main <- paste0("gamma[", i, "]")
+    node <- paste0("log_gamma[", i, "]")
+    plot(exp(params[,node]), type = "l", main = main)
+    abline(h = sim_data$method_lookup[i+3, "gamma"], col = "red")
+    hist(exp(params[,node]), xlim = c(0, 4), main = main)
+    abline(v = sim_data$method_lookup[i+3, "gamma"], col = "red")
+  }
+
+  par(mfrow = c(3, 2))
+  for(i in 1:5){
+    main <- paste0("rho[", i, "]")
+    node <- paste0("log_rho[", i, "]")
+    plot(exp(params[,node]), type = "l", main = main)
+    abline(h = sim_data$method_lookup[i, "rho"], col = "red", lwd = 2)
+    hist(exp(params[,node]), main = main)
+    abline(v = sim_data$method_lookup[i, "rho"], col = "red", lwd = 2)
+  }
+
+  par(mfrow = c(3, 2))
+  for(i in 1:3){
+    main <- paste0("p_mu[", i, "]")
+    node <- paste0("p_mu[", i, "]")
+    j <- if_else(i == 1, i, i + 2)
+    plot(ilogit(params[,node]), type = "l", main = main)
+    abline(h = sim_data$method_lookup[j, "p_unique"], col = "red")
+    hist(ilogit(params[,node]), xlim = c(0, 1))
+    abline(v = sim_data$method_lookup[j, "p_unique"], col = "red")
+  }
+
+
 
   write_rds(
     samples,
