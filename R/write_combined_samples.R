@@ -11,9 +11,9 @@ source("R/functions_predict.R")
 
 overide_existing_samples <- FALSE
 
-rep_num <- 7
+rep_num <- 1
 out_dir <- "out/simulation"
-model_dir <- "modifiedDM_betaSurvival_Informative"
+model_dir <- "modifiedDM_betaSurvival_dataByMethod"
 likelihood <- "poisson"
 mcmc_config <- "customMCMC"
 rep <- paste0("simulation_", rep_num)
