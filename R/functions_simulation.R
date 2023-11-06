@@ -45,10 +45,10 @@ simulate_dm <- function(
     freq = c(0.1, 0.05, 0.05, 0.3, 0.5),
     p_unique = runif(5),
     rho = c(runif(1, 0.01, 5), # firearms; p_mu[1]
-            runif(1, 5, 20),   # fixed wing
-            runif(1, 5, 20),   # helicopter
-            runif(1, 0.5, 2),  # snare; gamma[1], p_mu[2]
-            runif(1, 0.5, 2)), # traps; gamma[2], p_mu[3]
+            runif(1, 5, 30),   # fixed wing
+            runif(1, 5, 30),   # helicopter
+            runif(1, 0.01, 5),  # snare; gamma[1], p_mu[2]
+            runif(1, 0.01, 5)), # traps; gamma[2], p_mu[3]
     gamma = c(0, 0, 0, rgamma(1, 7.704547, 4.41925), rgamma(1, 3.613148, 3.507449))
   )
 
@@ -119,8 +119,8 @@ simulate_dm <- function(
           } else if(m == 4 | m == 5){
             log_potential_area <- log(pi) +
               (2 * (log_rho[m] + log_effort_per -
-                      log(exp(log_gamma[m-3]) + effort_per))) +
-              log(1 + (p_unique[m-2] * n_trap_m1))
+                      log(exp(log_gamma[m]) + effort_per))) +
+              log(1 + (p_unique[m] * n_trap_m1))
           }
 
           log_pr_area_sampled <- min(log_survey_area[i], log_potential_area)
