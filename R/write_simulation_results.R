@@ -45,7 +45,7 @@ for(i in seq_along(sim_runs)){
     simulation_files <- list.files(path)
 
     rds <- read_rds(file.path(path, "posteriorEval.rds"))
-    bad_mcmc <- rds$bad_mcmc | any(rds$psrf > 2)
+    bad_mcmc <- rds$bad_mcmc | any(rds$psrf > 1.3)
     task_id <- rds$task_id
     already_collated <- task_id %in% prev_tasks
 
@@ -503,13 +503,13 @@ message("posterior take done")
 
 
 
-area_summary <- all_area |>
-  pivot_longer(cols = -c(simulation),
-               names_to = "n_id") |>
-  filter(!is.na(value)) |>
-  group_by(simulation, n_id) |>
-  my_summary()
-
-property_attributes <- left_join(property_lookup, all_properties)
-
-left_join(a) |> filter(simulation == "1_10876", n_id %in% 1:10)
+# area_summary <- all_area |>
+#   pivot_longer(cols = -c(simulation),
+#                names_to = "n_id") |>
+#   filter(!is.na(value)) |>
+#   group_by(simulation, n_id) |>
+#   my_summary()
+#
+# property_attributes <- left_join(property_lookup, all_properties)
+#
+# left_join(a) |> filter(simulation == "1_10876", n_id %in% 1:10)
