@@ -2,6 +2,6 @@ default:
   out_dir: "out/simulation"
   analysis_dir: "analysis/simulation"
   model_dir: "modifiedDM_betaSurvival_dataJoint"
-  first: TRUE
+  first: FALSE
   init_dir: NULL
 
