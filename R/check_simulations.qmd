@@ -22,23 +22,27 @@ library(readxl)
 library(spatialreg)
 library(parallel)
 library(nimble)
+library(rgdal)
 library(coda)
 library(mgcv)
 source("../R/functions_nimble.R")
-file_dir <- "../analysis/simulation/modifiedDM_betaSurvival_dataJoint"
+file_dir <- "../out/simulation"
 df <- read_csv(file.path(file_dir, "summaryRecovered_litterSize.csv"))
 
 n_experiments <- length(unique(df$simulation))
 
 ```
 
+
 Total number of simulations run: `r n_experiments`
+
 
 ## Litter size
 
-The reproduction part of the process model has been reparameterized to assume that females have one litter per year. This way we only have to estimate one parameter, which is the number of piglets per litter. The prior for litter size is
+The reproduction part of the process model has been reparameterized to assume that females have one litter per year. This way we only have to estimate one parameter, which is the number of piglets per litter. The prior for litter size is 
 
 $$ls \sim exp(N(0, 2))$$
+
 
 ```{r Reproduction parameters}
 #| label: fig-reproSummary
@@ -61,6 +65,7 @@ df |>
        color = element_blank()) +
   theme_bw()
 ```
+
 
 ```{r Reproduction parameters}
 #| label: fig-reproRecovered
@@ -204,6 +209,7 @@ where $e$ is effort per trap and $\rho$ is the search area by a unit of removal 
 
 # Gamma
 
+
 ```{r}
 #| label: fig-gamma
 
@@ -268,16 +274,19 @@ df |>
   theme_bw() +
   theme(axis.text.x = element_blank())
 
-plot_p("SNARE") #+ coord_cartesian(ylim = c(0, 65))
-plot_p("TRAPS") #+ coord_cartesian(ylim = c(0, 65))
+plot_p("SNARE") + coord_cartesian(ylim = c(0, 65))
+plot_p("TRAPS") + coord_cartesian(ylim = c(0, 65))
 
 ```
+
 
 Percent of simulations recovering saturation constant (gamma):
 
 ```{r}
 knitr::kable(gamma_recovered)
 ```
+
+
 
 The area searched for firearms, fixed wing aircraft, and helicopters is:
 
@@ -340,11 +349,15 @@ plot_p("Traps")
 
 ```
 
+
 Percent of simulations recovering search area (rho):
 
 ```{r}
 knitr::kable(rho_recovered)
 ```
+
+
+
 
 When more than one unit of a removal method is deployed, we need to estimated the degree of overlap of search area that could occur:
 
@@ -355,13 +368,8 @@ Where $n$ is the number of units deployed and $\zeta$ is the degree of overlap. 
 ```{r overlap}
 #| label: fig-p
 
-method_lookup_p <- tibble(
-  idx = 1:3,
-  method = c("Firearms", "Snare", "Traps")
-)
-
 df <- read_csv(file.path(file_dir, "summaryResidual_uniqueArea.csv")) |> 
-  left_join(method_lookup_p)
+  left_join(method_lookup)
 
 df |> 
   ggplot() +
@@ -378,7 +386,7 @@ df |>
 
 df <- read_csv(file.path(file_dir, "summaryRecovered_uniqueArea.csv")) |> 
   select(-method) |> 
-  left_join(method_lookup_p)
+  left_join(method_lookup)
 
 p_recovered <- df |> 
   group_by(method) |> 
@@ -405,8 +413,8 @@ df |>
 
 
 plot_p("Firearms")
-# plot_p("Fixed wing")
-# plot_p("Helicopter")
+plot_p("Fixed wing")
+plot_p("Helicopter")
 plot_p("Snare")
 plot_p("Traps")
 
@@ -414,11 +422,14 @@ plot_p("Traps")
 
 ```
 
+
 Percent of simulations recovering unique area (zeta):
 
 ```{r}
 knitr::kable(p_recovered)
 ```
+
+
 
 Across simulations, the $\zeta$ values were accurately estimated, however with helicopters and fixed wing aircraft these posteriors do not deviate from the prior, which is most likely a sample size issue.
 
@@ -483,11 +494,13 @@ bad_beta |>
 
 ```
 
+
 Percent of simulations recovering capture probability parameters+:
 
 ```{r}
 knitr::kable(beta_recovered)
 ```
+
 
 Across simulations, the $\beta$ values were accurately estimated.
 
@@ -598,595 +611,664 @@ xn_error |>
 
 Not surprisingly, accuracy (mean absolute error) decreases as abundance increases, which is due to posteriors being biased low.
 
-    bad_prop <- xn_error |>
-      ungroup() |> 
-      filter(rmse_abundance == max(rmse_abundance)) |> 
-      slice(1)
+```
+bad_prop <- xn_error |>
+  ungroup() |> 
+  filter(rmse_abundance == max(rmse_abundance)) |> 
+  slice(1)
 
-    # med_phi <- phi |> 
-    #   filter(property == bad_prop$property, 
-    #          simulation == bad_prop$simulation) |> 
-    #   pull(med)
+# med_phi <- phi |> 
+#   filter(property == bad_prop$property, 
+#          simulation == bad_prop$simulation) |> 
+#   pull(med)
 
-    xn_posterior |> 
-      filter(property == bad_prop$property, 
-             simulation == bad_prop$simulation) |> 
-      ggplot() +
-      aes(x = PPNum, y = med_abundance, ymin = low_abundance, ymax = high_abundance) +
-      geom_linerange() +
-      geom_point() +
-      geom_point(aes(y = abundance), shape = 18, color = "red") +
-      labs(title = "Property with the largest RMSE",
-           y = "Abundance",
-           x = "Primary period") +
-      theme_bw()
+xn_posterior |> 
+  filter(property == bad_prop$property, 
+         simulation == bad_prop$simulation) |> 
+  ggplot() +
+  aes(x = PPNum, y = med_abundance, ymin = low_abundance, ymax = high_abundance) +
+  geom_linerange() +
+  geom_point() +
+  geom_point(aes(y = abundance), shape = 18, color = "red") +
+  labs(title = "Property with the largest RMSE",
+       y = "Abundance",
+       x = "Primary period") +
+  theme_bw()
+```
 
-    #| label: fig-sum_take
-    #| layout-ncol: 2
-    #| fig-cap: "Effort: pigs removed"
-    #| fig-subcap: 
-    #|   - "Bias"
-    #|   - "Percentage Error"
-    #|   - "RMSE"
+```
+#| label: fig-sum_take
+#| layout-ncol: 2
+#| fig-cap: "Effort: pigs removed"
+#| fig-subcap: 
+#|   - "Bias"
+#|   - "Percentage Error"
+#|   - "RMSE"
 
-    sum_take <- all_take |> 
-      group_by(property, PPNum, county, simulation) |> 
-      summarise(take = sum(take),
-                sum_effort_per = sum(effort_per),
-                avg_effort_per = mean(effort_per),
-                n_method = length(unique(method))) |> 
-      ungroup()
+sum_take <- all_take |> 
+  group_by(property, PPNum, county, simulation) |> 
+  summarise(take = sum(take),
+            sum_effort_per = sum(effort_per),
+            avg_effort_per = mean(effort_per),
+            n_method = length(unique(method))) |> 
+  ungroup()
 
 
-    all_methods <- all_methods |> 
-      rename(Method = method,
-             method = idx)
+all_methods <- all_methods |> 
+  rename(Method = method,
+         method = idx)
 
-    all_effort <- left_join(all_take, xn_error) |> 
-      left_join(all_methods)
+all_effort <- left_join(all_take, xn_error) |> 
+  left_join(all_methods)
 
-    effort <- left_join(sum_take, xn_error) 
+effort <- left_join(sum_take, xn_error) 
 
-    effort |> 
-      ggplot() +
-      aes(y = mbias_abundance, x = take, color = survival_prior) +
-      geom_hline(yintercept = 0, linetype = "dashed") +
-      geom_point(size = 0.75) +
-      labs(title = "Bias",
-           y = "Median bias",
-           x = "Total pigs removed during primary period") +
-      theme_bw()
+effort |> 
+  ggplot() +
+  aes(y = mbias_abundance, x = take, color = survival_prior) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_point(size = 0.75) +
+  labs(title = "Bias",
+       y = "Median bias",
+       x = "Total pigs removed during primary period") +
+  theme_bw()
 
-    effort |> 
-      ggplot() +
-      aes(y = mpe_abundance, x = take, color = survival_prior) +
-      geom_point(size = 0.75) +
-      labs(title = "Percent error",
-           y = "Median percent error",
-           x = "Total pigs removed during primary period") +
-      theme_bw()
+effort |> 
+  ggplot() +
+  aes(y = mpe_abundance, x = take, color = survival_prior) +
+  geom_point(size = 0.75) +
+  labs(title = "Percent error",
+       y = "Median percent error",
+       x = "Total pigs removed during primary period") +
+  theme_bw()
 
-    effort |> 
-      mutate(rmse_abundance = (rmse_abundance)) |> 
-      ggplot() +
-      aes(y = rmse_abundance, x = take, color = survival_prior) +
-      geom_point(size = 0.75) +
-      labs(title = "RMSE",
-           y = "RMSE",
-           x = "Total pigs removed during primary period") +
-      theme_bw()
+effort |> 
+  mutate(rmse_abundance = (rmse_abundance)) |> 
+  ggplot() +
+  aes(y = rmse_abundance, x = take, color = survival_prior) +
+  geom_point(size = 0.75) +
+  labs(title = "RMSE",
+       y = "RMSE",
+       x = "Total pigs removed during primary period") +
+  theme_bw()
 
-    all_effort |> 
-      ggplot() +
-      aes(x = trap_count, y = rmse_abundance) +
-      geom_point() +
-      # geom_smooth(method = "glm") +
-      facet_grid(survival_prior ~ Method, scales = "free_x") +
-      theme_bw()
+
+```
+
+```
+all_effort |> 
+  ggplot() +
+  aes(x = trap_count, y = rmse_abundance) +
+  geom_point() +
+  # geom_smooth(method = "glm") +
+  facet_grid(survival_prior ~ Method, scales = "free_x") +
+  theme_bw()
+
+```
 
 ## Firearms
 
-    #| label: fig-firearms_bias
-    #| fig-cap: "Heatmaps for bias when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 4
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    z <- "mbias_abundance"
-    main <- "Bias using FIREARMS"
-    rho_lab <- "Search area by firearms per hunt hour"
-    p_lab <- "Proportion of unique area with additonal firearms"
-    e_lab <- "Effort per firearm"
-    t_lab <- "log(Number of pigs removed + 1)"
-    tc_lab <- "Number of firearms*"
-    library(lattice)
-    all_effort_sub <- all_effort
-    data_f <- filter(all_effort_sub, Method == "FIREARMS", survival_prior == "Uninformative") |> 
-      distinct() |> 
-      mutate(take = log(take + 1))
+```
+#| label: fig-firearms_bias
+#| fig-cap: "Heatmaps for bias when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 4
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+z <- "mbias_abundance"
+main <- "Bias using FIREARMS"
+rho_lab <- "Search area by firearms per hunt hour"
+p_lab <- "Proportion of unique area with additonal firearms"
+e_lab <- "Effort per firearm"
+t_lab <- "log(Number of pigs removed + 1)"
+tc_lab <- "Number of firearms*"
+library(lattice)
+all_effort_sub <- all_effort
+data_f <- filter(all_effort_sub, Method == "FIREARMS", survival_prior == "Uninformative") |> 
+  distinct() |> 
+  mutate(take = log(take + 1))
 
-    heat_map <- function(df, z, x, y, x_lab, y_lab, m){
-      levelplot(df[[z]] ~ df[[x]]*df[[y]], 
-              data = df,
-              xlab = x_lab,
-              ylab = y_lab,
-              main = m,
-              region = TRUE)  
-    }
+heat_map <- function(df, z, x, y, x_lab, y_lab, m){
+  levelplot(df[[z]] ~ df[[x]]*df[[y]], 
+          data = df,
+          xlab = x_lab,
+          ylab = y_lab,
+          main = m,
+          region = TRUE)  
+}
 
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+
+
+```
 
 Most under predictions come from when search area is low
 
-    #| label: fig-firearms_accuracy
-    #| fig-cap: "Heatmaps for mean percentage error when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 4
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
+```
+#| label: fig-firearms_accuracy
+#| fig-cap: "Heatmaps for mean percentage error when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 4
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
 
-    z <- "mpe_abundance"
-    main <- "Accuracy (MPE) using FIREARMS"
+z <- "mpe_abundance"
+main <- "Accuracy (MPE) using FIREARMS"
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
-    #| label: fig-firearms_uncertainty
-    #| fig-cap: "Heatmaps for RMSE when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 4
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    #|   
-    z <- "rmse_abundance"
-    main <- "Uncertainty (log[RMSE]) using FIREARMS"
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+```
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+```
+#| label: fig-firearms_uncertainty
+#| fig-cap: "Heatmaps for RMSE when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 4
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+#|   
+z <- "rmse_abundance"
+main <- "Uncertainty (log[RMSE]) using FIREARMS"
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+
+
+```
 
 ## Fixed wing
 
-    #| label: fig-fixeding_bias
-    #| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
-    #| layout-ncol: 2
-    #| layout-nrow: 3
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "take vs effort per"
+```
+#| label: fig-fixeding_bias
+#| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
+#| layout-ncol: 2
+#| layout-nrow: 3
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "take vs effort per"
 
-    z <- "mbias_abundance"
-    main <- "Bias using FIXED WING"
-    rho_lab <- "Search area by fixed wing aircraft per flight hour"
-    p_lab <- "Proportion of unique area with additonal aircraft"
-    e_lab <- "Effort per aircraft"
+z <- "mbias_abundance"
+main <- "Bias using FIXED WING"
+rho_lab <- "Search area by fixed wing aircraft per flight hour"
+p_lab <- "Proportion of unique area with additonal aircraft"
+e_lab <- "Effort per aircraft"
 
-    data_f <- filter(all_effort_sub, Method == "FIXED WING") |> 
-      distinct() |> 
-      mutate(take = log(take + 1))
+data_f <- filter(all_effort_sub, Method == "FIXED WING") |> 
+  distinct() |> 
+  mutate(take = log(take + 1))
 
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
 
-    #| label: fig-fixedwing_accuracy
-    #| fig-cap: "Heatmaps for mean percentage error when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 4
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "take vs effort per"
-    z <- "mpe_abundance"
-    main <- "Accuracy (MPE) using FIXED WING"
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+```
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+```
+#| label: fig-fixedwing_accuracy
+#| fig-cap: "Heatmaps for mean percentage error when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 4
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "take vs effort per"
+z <- "mpe_abundance"
+main <- "Accuracy (MPE) using FIXED WING"
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
 
-    #| label: fig-fixedwing_uncertainty
-    #| fig-cap: "Heatmaps for RMSE when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 4
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "take vs effort per"
-    z <- "rmse_abundance"
-    main <- "Uncertainty (log[RMSE]) using FIREARMS"
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+```
+
+```
+#| label: fig-fixedwing_uncertainty
+#| fig-cap: "Heatmaps for RMSE when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 4
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "take vs effort per"
+z <- "rmse_abundance"
+main <- "Uncertainty (log[RMSE]) using FIREARMS"
+
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+
+
+```
 
 ## Helicopter
 
-    #| label: fig-helicopter_bias
-    #| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
-    #| layout-ncol: 2
-    #| layout-nrow: 4
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    z <- "mbias_abundance"
-    main <- "Bias using HELICOPTER"
-    rho_lab <- "Search area by helicopters per flight hour"
-    p_lab <- "Proportion of unique area with additonal helicopters"
-    e_lab <- "Effort per helicopter"
-    tc_lab <- "Number of helicopters"
+```
+#| label: fig-helicopter_bias
+#| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
+#| layout-ncol: 2
+#| layout-nrow: 4
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+z <- "mbias_abundance"
+main <- "Bias using HELICOPTER"
+rho_lab <- "Search area by helicopters per flight hour"
+p_lab <- "Proportion of unique area with additonal helicopters"
+e_lab <- "Effort per helicopter"
+tc_lab <- "Number of helicopters"
 
-    data_f <- filter(all_effort_sub, Method == "HELICOPTER") |> 
-      distinct() |> 
-      mutate(take = log(take + 1))
+data_f <- filter(all_effort_sub, Method == "HELICOPTER") |> 
+  distinct() |> 
+  mutate(take = log(take + 1))
 
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
-    #| label: fig-helicopter_accuracy
-    #| fig-cap: "Heatmaps for mean percentage error when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 4
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    z <- "mpe_abundance"
-    main <- "Accuracy (MPE) using HELICOPTER"
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+```
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+```
+#| label: fig-helicopter_accuracy
+#| fig-cap: "Heatmaps for mean percentage error when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 4
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+z <- "mpe_abundance"
+main <- "Accuracy (MPE) using HELICOPTER"
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
 
-    #| label: fig-helicopter_uncertainty
-    #| fig-cap: "Heatmaps for RMSE when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 4
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    z <- "rmse_abundance"
-    main <- "Uncertainty (log[RMSE]) using HELICOPTER"
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+```
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+```
+#| label: fig-helicopter_uncertainty
+#| fig-cap: "Heatmaps for RMSE when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 4
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+z <- "rmse_abundance"
+main <- "Uncertainty (log[RMSE]) using HELICOPTER"
+
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+
+
+```
 
 ## Snares
 
-    #| label: fig-snare_bias
-    #| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
-    #| layout-ncol: 2
-    #| layout-nrow: 6
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "gamma vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "gamma vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "gamma vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    z <- "mbias_abundance"
-    main <- "Bias using SNARES"
-    rho_lab <- "Search area by snares per trap night"
-    p_lab <- "Proportion of unique area with additonal snares"
-    e_lab <- "Effort per snare"
-    tc_lab <- "Number of snares"
-    g_lab <- "Saturation constant"
+```
+#| label: fig-snare_bias
+#| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
+#| layout-ncol: 2
+#| layout-nrow: 6
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "gamma vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "gamma vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "gamma vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+z <- "mbias_abundance"
+main <- "Bias using SNARES"
+rho_lab <- "Search area by snares per trap night"
+p_lab <- "Proportion of unique area with additonal snares"
+e_lab <- "Effort per snare"
+tc_lab <- "Number of snares"
+g_lab <- "Saturation constant"
 
-    data_f <- filter(all_effort_sub, Method == "SNARE") |> 
-      distinct() |> 
-      mutate(take = log(take + 1))
+data_f <- filter(all_effort_sub, Method == "SNARE") |> 
+  distinct() |> 
+  mutate(take = log(take + 1))
 
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
-    heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
-    heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
-    heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
-    #| label: fig-snare_accuracy
-    #| fig-cap: "Heatmaps for mean percentage error when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 6
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "gamma vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "gamma vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "gamma vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    z <- "mpe_abundance"
-    main <- "Accuracy (MPE) using SNARE"
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
-    heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
+```
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
-    heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
+```
+#| label: fig-snare_accuracy
+#| fig-cap: "Heatmaps for mean percentage error when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 6
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "gamma vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "gamma vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "gamma vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+z <- "mpe_abundance"
+main <- "Accuracy (MPE) using SNARE"
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
-    heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
 
-    #| label: fig-snare_uncertainty
-    #| fig-cap: "Heatmaps for RMSE when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 6
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "gamma vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "gamma vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "gamma vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    z <- "rmse_abundance"
-    main <- "Uncertainty (log[RMSE]) using SNARE"
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
-    heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
-    heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
-    heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
+```
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+```
+#| label: fig-snare_uncertainty
+#| fig-cap: "Heatmaps for RMSE when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 6
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "gamma vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "gamma vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "gamma vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+z <- "rmse_abundance"
+main <- "Uncertainty (log[RMSE]) using SNARE"
+
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
+
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
+
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
+
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+
+
+```
 
 ## Traps
 
-    #| label: fig-trap_bias
-    #| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
-    #| layout-ncol: 2
-    #| layout-nrow: 6
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "gamma vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "gamma vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "gamma vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    z <- "mbias_abundance"
-    main <- "Bias using TRAPS"
-    rho_lab <- "Search area by traps per trap night"
-    p_lab <- "Proportion of unique area with additonal traps"
-    e_lab <- "Effort per trap"
-    tc_lab <- "Number of traps"
-    g_lab <- "Saturation constant"
+```
+#| label: fig-trap_bias
+#| fig-cap: "Heatmaps for bias when using fixed wing aircraft"
+#| layout-ncol: 2
+#| layout-nrow: 6
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "gamma vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "gamma vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "gamma vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+z <- "mbias_abundance"
+main <- "Bias using TRAPS"
+rho_lab <- "Search area by traps per trap night"
+p_lab <- "Proportion of unique area with additonal traps"
+e_lab <- "Effort per trap"
+tc_lab <- "Number of traps"
+g_lab <- "Saturation constant"
 
-    data_f <- filter(all_effort_sub, Method == "TRAPS") |> 
-      distinct() |> 
-      mutate(take = log(take + 1))
+data_f <- filter(all_effort_sub, Method == "TRAPS") |> 
+  distinct() |> 
+  mutate(take = log(take + 1))
 
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
-    heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
-    heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
-    heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
-    #| label: fig-trap_accuracy
-    #| fig-cap: "Heatmaps for mean percentage error when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 6
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "gamma vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "gamma vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "gamma vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    z <- "mpe_abundance"
-    main <- "Accuracy (MPE) using TRAPS"
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
-    heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
+```
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
-    heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
+```
+#| label: fig-trap_accuracy
+#| fig-cap: "Heatmaps for mean percentage error when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 6
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "gamma vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "gamma vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "gamma vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+z <- "mpe_abundance"
+main <- "Accuracy (MPE) using TRAPS"
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
-    heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
 
-    #| label: fig-trap_uncertainty
-    #| fig-cap: "Heatmaps for RMSE when using firearms"
-    #| layout-ncol: 2
-    #| layout-nrow: 6
-    #| fig-subcap: 
-    #|   - "rho vs effort per"
-    #|   - "zeta vs effort per"
-    #|   - "gamma vs effort per"
-    #|   - "rho vs take"
-    #|   - "zeta vs take"
-    #|   - "gamma vs take"
-    #|   - "rho vs units deployed"
-    #|   - "zeta vs units deployed"
-    #|   - "gamma vs units deployed"
-    #|   - "take vs effort per"
-    #|   - "take vs units deployed"
-    z <- "rmse_abundance"
-    main <- "Uncertainty (log[RMSE]) using TRAPS"
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
-    heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
-    heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
 
-    heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
-    heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
-    heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
 
-    heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
-    heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
-    heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
+```
 
-    heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
-    heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+```
+#| label: fig-trap_uncertainty
+#| fig-cap: "Heatmaps for RMSE when using firearms"
+#| layout-ncol: 2
+#| layout-nrow: 6
+#| fig-subcap: 
+#|   - "rho vs effort per"
+#|   - "zeta vs effort per"
+#|   - "gamma vs effort per"
+#|   - "rho vs take"
+#|   - "zeta vs take"
+#|   - "gamma vs take"
+#|   - "rho vs units deployed"
+#|   - "zeta vs units deployed"
+#|   - "gamma vs units deployed"
+#|   - "take vs effort per"
+#|   - "take vs units deployed"
+z <- "rmse_abundance"
+main <- "Uncertainty (log[RMSE]) using TRAPS"
+
+heat_map(data_f, z, "rho", "effort_per", rho_lab, e_lab, main)
+heat_map(data_f, z, "p_unique", "effort_per", p_lab, e_lab, main)
+heat_map(data_f, z, "gamma", "effort_per", g_lab, e_lab, main)
+
+heat_map(data_f, z, "rho", "take", rho_lab, t_lab, main)
+heat_map(data_f, z, "p_unique", "take", p_lab, t_lab, main)
+heat_map(data_f, z, "gamma", "take", g_lab, e_lab, main)
+
+heat_map(data_f, z, "rho", "trap_count", rho_lab, tc_lab, main)
+heat_map(data_f, z, "p_unique", "trap_count", p_lab, tc_lab, main)
+heat_map(data_f, z, "gamma", "trap_count", g_lab, e_lab, main)
+
+heat_map(data_f, z, "take", "effort_per", t_lab, e_lab, main)
+heat_map(data_f, z, "take", "trap_count", t_lab, tc_lab, main)
+
+
+```
