@@ -3,7 +3,7 @@ library(tidyverse)
 library(lubridate)
 library(nimble)
 
-data_timestep <- read_csv("data/insitu/MIS_2020_timesteps.csv") |>
+data_timestep <- read_csv("data/insitu/MIS.Effort.Take.All.Methods.Daily.Events.2021-03-25.csv") |>
   mutate(cnty_name = if_else(grepl("ST ", cnty_name), gsub("ST ", "ST. ", cnty_name), cnty_name),
          cnty_name = if_else(grepl("KERN", cnty_name), "KERN", cnty_name))
 
