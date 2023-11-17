@@ -11,7 +11,6 @@ article:
   column: page
 ---
 
-
 ```{r}
 #| label: setup
 library(ggpubr)
@@ -23,9 +22,834 @@ my_hex <- function(gg){
     geom_hex() +
     scale_fill_viridis_c()
 }
+
+get_n <- function(df, prop, M, total){
+  df |> 
+    filter(prop_record == prop) |> 
+    group_by(Method) |> 
+    count() |> 
+    ungroup() |> 
+    mutate(n = abs(M - n),
+           np1 = round(n / sum(n), 3),
+           np = round(n / total, 3))
+}
+
 ```
 
+This document is trying to accomplish two goals:
 
+1.  Explore how take methods are used across the country in the MIS data.
+
+2.  Use this EDA as a guide to generate pseudo-data for model simulation experiments.
+
+```{r}
+df <- read_csv("../data/insitu/MIS_4weekPP.csv") |> 
+  filter(st_name != "HAWAII")
+
+zero_take_properties <- df |> 
+  group_by(agrp_prp_id) |> 
+  summarise(take = sum(take)) |> 
+  filter(take == 0) |> 
+  pull(agrp_prp_id)
+
+method_change <- tibble(
+  method = c("TRAPS, CAGE", "SNARE", "FIREARMS", "FIXED WING", "HELICOPTER"),
+  method_2 = c("Traps", "Snares", "Firearms", "Fixed wing", "Helicopter")
+)
+
+df <- df |> 
+  filter(!agrp_prp_id %in% zero_take_properties) |> 
+  rename(method = cmp_name) |> 
+  mutate(property.size = property.size / 247.1) |> 
+  left_join(method_change) |> 
+  rename(Method = method_2)
+
+write_rds(df, "../data/insitu/MIS_4weekPP.rds")
+
+n_property <- length(unique(df$agrp_prp_id))
+n_units <- df |> 
+  select(agrp_prp_id, timestep) |> 
+  distinct() |> 
+  nrow()
+min_date <- min(df$start.date)
+max_date <- max(df$start.date)
+
+get_freqs <- function(df){
+  df |>
+    group_by(method) |>
+    summarise(n_records = n(),
+              n_take = sum(take),
+              prop_records = round(n_records / nrow(df), 3)) |>
+    mutate(prop_take = round(n_take / sum(n_take), 3)) 
+}
+
+all_freq <- get_freqs(df)
+```
+
+First, an over of the MIS data, which is from `r min_date` to `r max_date` and includes:
+
+-   `r n_property` unique properties
+
+-   `r n_units` unique sampling units (property-timestep combination)
+
+-   Does not include Hawaii
+
+-   Does not include properties with zero take
+
+##### Frequency of records and take in the MIS data
+
+```{r}
+#| label: tbl-all_freq
+#| tbl-cap: The total and relative number of removal events and feral swine removed by method across the MIS data.
+all_freq |> 
+  rename(Method = method) |> 
+  mutate(`Removal events` = paste0(n_records, " (", prop_records, ")"),
+         `Swine removed` = paste0(n_take, " (", prop_take, ")")) |> 
+  select(Method, `Removal events`, `Swine removed`) |> 
+  knitr::kable()
+
+get_prop <- function(m){
+  all_freq |> 
+    filter(method == m) |> 
+    pull(prop_take) * 100
+}
+get_rec <- function(m){
+  all_freq |> 
+    filter(method == m) |> 
+    pull(prop_records) * 100
+}
+
+heli_prop <- get_prop("HELICOPTER")
+heli_rec <- get_rec("HELICOPTER")
+trap_prop <- get_prop("TRAPS, CAGE")
+trap_rec <- get_rec("TRAPS, CAGE")
+snare_prop <- get_prop("SNARE")
+snare_rec <- get_rec("SNARE")
+wing_prop <- get_prop("FIXED WING")
+wing_rec <- get_rec("FIXED WING")
+
+```
+
+Clearly the most effective method is helicopters, which accounts for `r heli_prop`% of the swine removed but is deployed only `r heli_rec`% of the time. Traps are used the most often, where `r trap_rec`% of all removal events are by trap, accounting for `r trap_prop`% of swine removed. Snares are the second-most used removal method at `r snare_rec`% of events, but only account for `r snare_prop`% of swine removed. Fixed wing aircraft remove almost the same amount of swine as snares at `r wing_prop`% but are only used `r wing_rec`% of the time. Firerarms are rarely used and account for the least amount of swine removed.
+
+# Pseudo-data parameters
+
+Before diving into specific methods and when/how often to use them, we need to figure out how many properties to simulate and how many primary periods to simulate swine dynamics over.
+
+## How many properties do we need?
+
+To figure out how many properties we need to use in a single simulation experiment, it might help to look at how many properties use various combinations of methods. Let's look at this across properties and across sampling units. A sampling unit is defined as a single primary period (a 4-week interval) within a single property.
+
+```{r}
+#| label: make percents
+method_percent <- function(dat){
+  dat |> 
+    summarise(Snares = length(which(method == "SNARE")) / n(),
+              Traps = length(which(method == "TRAPS, CAGE")) / n(),
+              Firearms = length(which(method == "FIREARMS")) / n(),
+              `Fixed wing` = length(which(method == "FIXED WING")) / n(),
+              Helicopter = length(which(method == "HELICOPTER")) / n())
+}
+
+percents_record_prp <- df |>
+  select(agrp_prp_id, method) |>
+  group_by(agrp_prp_id) |>
+  method_percent() |> 
+  ungroup() |> 
+  pivot_longer(cols = -agrp_prp_id,
+               names_to = "method",
+               values_to = "prop_record")
+
+
+
+  
+percents_take_prp <- df |>
+  group_by(agrp_prp_id, method) |>
+  summarise(take = sum(take)) |> 
+  ungroup() |> 
+  group_by(agrp_prp_id) |> 
+  mutate(prop_take = take / sum(take),
+         prop_take = if_else(is.nan(prop_take), 0, prop_take)) |> 
+  left_join(method_change) |> 
+  select(-method) |> 
+  rename(method = method_2)
+
+prop_property <- left_join(percents_record_prp, percents_take_prp) |> 
+  rename(Method = method)
+
+percents_record_prpTime <- df |>
+  select(agrp_prp_id, method, timestep) |>
+  group_by(agrp_prp_id, timestep) |>
+  method_percent() |> 
+  ungroup() |> 
+  pivot_longer(cols = -c(agrp_prp_id, timestep),
+               names_to = "method",
+               values_to = "prop_record")
+
+percents_take_prpTime <- df |>
+  group_by(agrp_prp_id, method, timestep) |>
+  summarise(take = sum(take)) |> 
+  ungroup() |> 
+  group_by(agrp_prp_id, timestep) |> 
+  mutate(prop_take = take / sum(take),
+         prop_take = if_else(is.nan(prop_take), 0, prop_take)) |> 
+  left_join(method_change) |> 
+  select(-method) |> 
+  rename(method = method_2)
+
+prop_propertyTime <- left_join(percents_record_prpTime, percents_take_prpTime) |> 
+  rename(Method = method)
+```
+
+##### How many methods are used within properties and sample units?
+
+```{r}
+#| label: tbl-nMethods
+#| tbl-cap: The proportion of properties and the proportion of sampling units that use different methods.
+
+number_used_p <- prop_property |> 
+  filter(prop_record != 0) |> 
+  group_by(agrp_prp_id) |> 
+  count() |>
+  group_by(n) |> 
+  count() |> 
+  mutate(np = round(nn / n_property, 3)) |> 
+  rename(`n methods` = n) |> 
+  mutate(`Proportion of properties` = paste0(np, " (", nn, ")")) 
+
+prop_1 <- number_used_p |> 
+  filter(`n methods` == 1) |> 
+  pull(np) * 100
+prop_2 <- number_used_p |> 
+  filter(`n methods` == 2) |> 
+  pull(np) * 100
+
+n1 <- number_used_p |> select(-nn, -np)
+
+number_used_t <- prop_propertyTime |> 
+  filter(prop_record != 0) |> 
+  group_by(agrp_prp_id, timestep) |> 
+  count() |>
+  group_by(n) |> 
+  count() |> 
+  mutate(np = round(nn / n_units, 3)) |> 
+  rename(`n methods` = n) |> 
+  mutate(`Proportion of sampling units` = paste0(np, " (", nn, ")"))
+  
+ts_1 <- number_used_t |> 
+  filter(`n methods` == 1) |> 
+  pull(np) * 100
+ts_2 <- number_used_t |> 
+  filter(`n methods` == 2) |> 
+  pull(np) * 100
+ts_3 <- number_used_t |> 
+  filter(`n methods` == 3) |> 
+  pull(np) * 100
+
+
+n2 <- number_used_t |> select(-nn, -np)
+nn <- left_join(n1, n2)
+knitr::kable(nn)
+
+```
+
+`r prop_1`% and `r prop_2`% of properties use one or two methods, respectively. However, `r ts_1`% of all sampling units use a single method (@tbl-specificMethod has the breakdown of methods used in isolation), followed by `r ts_2`% of sample units using two methods. Very few sampling units use three methods (`r ts_3`%), and no sampling unit uses four or five methods.
+
+```{r}
+#| label: sim prop
+
+np_vec <- ceiling(number_used_p$np * 100)
+n_sim_prop <- sum(np_vec)
+np_prop <- round(np_vec / n_sim_prop * 100, 1)
+
+sim_prop <- tibble(
+  `n methods` = 1:5,
+  `Number of simulated properties` = np_vec,
+  `% in simulated data` = np_prop,
+  `% in MIS data` = number_used_p$np * 100
+)
+
+```
+
+Given this breakdown across properties, and a desire to capture as much of the structure present in the MIS data within the pseudo-data, I think `r n_sim_prop` properties should be simulated with the following breakdown:
+
+##### Simulated data: number of properties
+
+```{r}
+#| label: tbl-simProp
+#| tbl-cap: Proposed breakdown of how many methods should be used within each simulated property
+knitr::kable(sim_prop)
+```
+
+## How many primary periods do we need?
+
+Now that we know there will be `r n_sim_prop` properties simulated, we need to figure out how many primary periods to simulate across. We need to look at two things, the distribution of missing timesteps across the entire MIS data, and how often each method is likely to return to a property. These return intervals will give us an indication of how long we need to run the simulation, particularly for properties that only use one method.
+
+##### Return intervals across methods and missing PPs
+
+```{r}
+#| label: fig-missing
+#| fig-cap: Overview of missing primary periods
+#| fig-subcap: 
+#|   - Missing PPs by property
+#|   - Proportion of missing PPs by property
+#|   - Proportion of missing PPs given timeseries length (each point is a property), with a loess curve.
+#| layout-ncol: 2
+
+delta_timestep <- df |> 
+  # filter(take > 0) |> 
+  select(agrp_prp_id, timestep) |>
+  unique() |> 
+  group_by(agrp_prp_id) |> 
+  mutate(delta = c(0, diff(timestep))) |> 
+  ungroup() |> 
+  filter(delta != 0) |> 
+  mutate(delta = delta - 1)
+  
+sum_missing <- delta_timestep |> 
+  group_by(agrp_prp_id) |> 
+  summarise(total_missing = sum(delta)) |> 
+  ungroup()
+
+n_pp <- df |> 
+  select(agrp_prp_id, timestep) |> 
+  unique() |> 
+  group_by(agrp_prp_id) |> 
+  filter(timestep == min(timestep) | timestep == max(timestep)) |> 
+  mutate(nPP = c(0, diff(timestep))) |> 
+  ungroup() |> 
+  filter(nPP != 0) |> 
+  mutate(nPP = nPP + 1)
+
+missing <- left_join(n_pp, sum_missing) |> 
+  mutate(prop_missing = total_missing / nPP)  
+
+delta_timestep |> 
+  ggplot() +
+  aes(x = delta) +
+  geom_histogram() +
+  labs(x = "Number of missing PPs between sampling events",
+       y = "Property count") +
+  theme_bw()
+  
+missing |> 
+  ggplot() +
+  aes(x = prop_missing) +
+  geom_histogram() +
+  labs(x = "Proportion of timeseries with no removal events",
+       y = "Property count") +
+  theme_bw()
+
+missing |> 
+  ggplot() +
+  aes(x = nPP, y = prop_missing) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(y = "Proportion of PP without a removal event",
+       x = "Total number of PPs in timeseries, removal events or not") +
+  theme_bw()
+
+
+```
+
+```{r}
+#| label: tbl-missing
+#| tbl-cap: Summary statistics for missing PPs. First row is the proportion of missing PPs, second row is the number of missing PPs between sampled PPs
+my_stats <- function(df, xx){
+  df |> 
+    summarise(Min = round(min(.data[[xx]]), 2),
+            `2.5% CI` = round(quantile(.data[[xx]], 0.025), 2),
+            `25% CI` = round(quantile(.data[[xx]], 0.25), 2),
+            Median = round(median(.data[[xx]]), 2),
+            Mean = round(mean(.data[[xx]]), 2),
+            `75% CI` = round(quantile(.data[[xx]], 0.75), 2),
+            `97.5% CI` = round(quantile(.data[[xx]], 0.975), 2),
+            Max = round(max(.data[[xx]]), 2)) |> 
+    ungroup()
+}
+m1 <- missing |> 
+  my_stats("prop_missing") |> 
+  mutate(Metric = "Proportion of timeseries with missing PPs")
+
+prop_mean <- m1 |> pull(Mean)
+
+m2 <- delta_timestep |> 
+  my_stats("delta") |> 
+  mutate(Metric = "Time difference between sampling occasions")
+
+delta_mean <- m2 |> pull(Mean)
+
+bind_rows(m1, m2) |> knitr::kable()
+```
+
+The average property has `r prop_mean`% of it's time series missing, and the average number of missing PPs between sampling events is `r delta_mean` (@tbl-missing). However, the distribution on the proportion of missing PPs is skewed, where the bulk of the mass is above the 50% mark (@fig-missing-2). Also, the trend in the proportion of missing PPs given time series length asymptotically approaches \~ 75%, reaching that point at a length of just 25 PPs (@fig-missing-3).
+
+##### Return interval of each method
+
+```{r}
+#| label: fig-delta
+#| fig-cap: Histograms of how often each method returns to a property
+intervals <- prop_propertyTime |> 
+  filter(prop_record != 0) |> 
+  group_by(agrp_prp_id, Method) |> 
+  mutate(delta = c(0, diff(timestep)),
+         single_occurance = if_else(n() == 1, 1, 0),
+         first_occurance = if_else(delta == 0 & single_occurance == 0, 1, 0)) |> 
+  ungroup()
+
+intervals |>
+  filter(delta > 0,
+         single_occurance == 0) |> 
+  ggplot(aes(x = delta)) +
+    geom_histogram(binwidth = 1, center = 0) +
+    labs(x = "Return interval (4 week periods)",
+         y = "Count") +
+    facet_wrap(~ Method, scales = "free") +
+    theme_bw()
+```
+
+```{r}
+#| label: tbl-delta
+#| tbl-cap: Summary statistics of how many primary periods it takes each method to return within properties.
+
+intervals |>
+  filter(delta > 0,
+         single_occurance == 0) |> 
+  group_by(Method) |>
+  my_stats("delta") |> 
+  knitr::kable()
+
+```
+
+All methods share the same lower bound on return interval. However, the upper tails differ where aerial methods return least frequently, and traps and snares return regularly.
+
+Given these return intervals, I propose we use a maximum time series length of 75 PPs. This will capture all of the return intervals for firearms, snares, and traps. For fixed wing and helicopters, this will capture most of their return interval distributions, dropping the most extreme values. Given the computational cost of running the model I'm hesitant to push this farther up.
+
+##### What does the data look like when subset to properties with 75 PP or less?
+
+```{r}
+#| label: fig-missing75
+#| fig-cap: Overview of missing primary periods when subset to properties with less than or equal to 75 PPs
+#| fig-subcap: 
+#|   - Proportion of missing PPs by property
+#|   - Proportion of missing PPs given timeseries length (each point is a property), with a loess curve.
+#| layout-ncol: 2
+nn <- 75
+missing |> 
+  filter(nPP <= nn) |> 
+  ggplot() +
+  aes(x = prop_missing) +
+  geom_histogram() +
+  labs(x = "Proportion of timeseries with no removal events",
+       y = "Property count") +
+  theme_bw()
+
+missing |> 
+  filter(nPP <= nn) |> 
+  ggplot() +
+  aes(x = nPP, y = prop_missing) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(y = "Proportion of PP without a removal event",
+       x = "Total number of PPs in timeseries, removal events or not") +
+  theme_bw()
+```
+
+So, now we know that there are `r n_sim_prop` properties with a maximum length of 75 primary periods. Now we need to distribute the properties into how many methods they use and when.
+
+## 1 method at a property
+
+```{r}
+get_n_properties <- function(n){
+  sim_prop |> filter(`n methods` == n) |> pull(`Number of simulated properties`)  
+}
+one_prop <- get_n_properties(1)
+
+```
+
+We know that `r one_prop` properties will only use one method. The next question is then how do we decide which method?
+
+##### When is a specific method used in isolation?
+
+```{r}
+#| label: tbl-specificMethod
+#| tbl-cap: The proportion of properties and the proportion of sampling units that only use a specific method.
+
+n1 <- get_n(prop_property, 1, 0, n_property) |> 
+  mutate(`Proportion of properties` = paste0(np1, " (", n, ")"))
+
+n1_traps <- n1 |> filter(Method == "Traps") |> pull(np1) * 100
+n1_use <- n1 |> select(Method, `Proportion of properties`)
+
+n2 <- get_n(prop_propertyTime, 1, 0, n_units) |> 
+  mutate(`Proportion of sample units` = paste0(np1, " (", n, ")"))
+n2_traps <- n2 |> filter(Method == "Traps") |> pull(np1) * 100
+n2_use <- n2 |> select(Method, `Proportion of sample units`)
+
+n3 <- left_join(n1_use, n2_use)
+knitr::kable(n3)
+```
+
+##### What does the frequency of events look like for properties that use a single method?
+
+```{r}
+#| label: fig-specificMethod
+#| fig-cap: What the data look like when a single method is used
+#| fig-subcap: 
+#|   - Return interval
+#|   - Number of replicate events in a PP
+#|   - The area of properties given the method they use
+#| layout-ncol: 2
+single_method_properties <- prop_property |> 
+  filter(prop_record == 1) |> 
+  pull(agrp_prp_id) |> 
+  unique()
+
+n_reps_single_method <- df |> 
+  filter(agrp_prp_id %in% single_method_properties) |> 
+  group_by(agrp_prp_id, timestep, method) |> 
+  count() |> 
+  ungroup()
+
+return_single_method <- df |> 
+  filter(agrp_prp_id %in% single_method_properties) |> 
+  select(agrp_prp_id, timestep, method) |>
+  distinct() |> 
+  group_by(agrp_prp_id, method) |> 
+  mutate(delta = c(0, diff(timestep)),
+         single_occurance = if_else(n() == 1, 1, 0),
+         first_occurance = if_else(delta == 0 & single_occurance == 0, 1, 0))
+
+return_single_method |> 
+  filter(first_occurance == 0) |> 
+  ggplot() +
+  aes(x = delta) +
+  geom_histogram() +
+  labs(x = "Return interval",
+       y = "Property count") +
+  facet_wrap(~ method, scales = "free") +
+  theme_bw()
+
+n_reps_single_method |> 
+  ggplot() +
+  aes(x = n) +
+  geom_histogram() +
+  labs(x = "Number of repeat events in a PP",
+       y = "Count") +
+  facet_wrap(~ method, scales = "free") +
+  theme_bw()
+
+one_method_areas <- df |> 
+  filter(agrp_prp_id %in% single_method_properties) |> 
+  select(agrp_prp_id, property.size, method) |>
+  distinct() |> 
+  left_join(method_change) |> 
+  select(-method) |> 
+  rename(method = method_2)
+
+one_method_areas |> 
+  ggplot() +
+  aes(x = property.size) +
+  geom_histogram() +
+  labs(x = "Property area (sq. km)",
+       y = "Count") +
+  facet_wrap(~ method, scales = "free") +
+  theme_bw()
+
+```
+
+When a property only uses a single method, it is most likely going to be traps. For example, given a property uses only one method, `r n1_traps`% of those properties use traps exclusively, which accounts for `r n2_traps`% of sampling units.
+
+For the `r one_prop` properties in the simulation that use one method, the method will be assigned given the weights in column two of @tbl-specificMethod using `sample(Method, n_prop, weights, replace = TRUE)`. Then, the starting PP will be randomly chosen depending on the method. For methods with infrequent return intervals (i.e. aerial methods), the starting PP will have to be within the first 20 primary periods to accommodate a long return interval. Other methods can start anytime before the last \~ 10 PPs. The frequency at which the method is used and the area if the property will then be bootstrapped from the data in @fig-specificMethod.
+
+Once the first PP is chosen, random samples of return intervals are chosen until the end of the 75 primary periods is reached. For example, let's say a property is assigned helicopters and a start PP of 30. If the first return interval chosen is 20, we are now at PP 50. If the second return interval chosen is 15, we are now at PP 65. If the next random return interval is greater than 10, we end the properties time series at PP 65.
+
+One example of that could look like:
+
+```{r}
+#| label: tbl-sample_one_method
+#| tbl-cap: The first 10 rows of the random assignment of properties to a single method and first sampled PP
+sample_one_method <- sample(n1$Method, one_prop, n1$np, replace = TRUE)
+
+start_pp <- function(m){
+  if(m %in% c("Firearms", "Traps", "Snares")){
+    round(runif(1, 0.5, 65))
+  } else {
+    round(runif(1, 0.5, 20))
+  }
+}
+
+area_one <- function(m){
+  one_method_areas |> 
+    filter(method == m) |> 
+    pull(property.size) |> 
+    sample(1)
+}
+
+tibble(
+  Property = 1:one_prop,
+  Method = sample_one_method,
+  Area = round(vapply(sample_one_method, area_one, 1), 2),
+  Start = vapply(sample_one_method, start_pp, 1)
+) |> 
+  head(10) |> 
+  knitr::kable()
+
+
+
+```
+
+## 2 methods at a property
+
+```{r}
+two_prop <- get_n_properties(2)
+```
+
+Next we need to assign `r two_prop` properties to use two removal methods.
+
+##### What are the relative frequencies of method combinations when two methods are used?
+
+```{r}
+#| label: tbl-pairs
+#| tbl-cap: The proportion of method combinations when two methods are used.
+#| tbl-subcap: 
+#|   - Across properties
+#|   - Across sampling units
+
+m_vec <- method_change$method_2
+
+combos <- function(dat){
+  df <- dat |> 
+    mutate(n = 1) |>
+    pivot_wider(names_from = Method,
+                values_from = n,
+                values_fill = 0) |> 
+  select(all_of(m_vec))
+  
+  combo_2 <- crossprod(as.matrix(df))
+  combo_2[lower.tri(combo_2, diag = TRUE)] <- NA
+  freqs_2 <- round(combo_2 / sum(combo_2, na.rm = TRUE), 3)
+  freqs_2[-5, -1]  
+}
+
+two_method_properties <- prop_property |> 
+  filter(prop_record != 0) |> 
+  group_by(agrp_prp_id) |> 
+  mutate(n = n()) |> 
+  ungroup() |> 
+  filter(n == 2) |> 
+  pull(agrp_prp_id) |> 
+  unique()
+
+ff <- prop_property |> 
+  filter(prop_record != 0) |> 
+  group_by(agrp_prp_id) |> 
+  mutate(n = n()) |> 
+  ungroup() |> 
+  filter(n == 2) |>
+  select(agrp_prp_id, Method) |>
+  combos() 
+
+fft <- prop_propertyTime |> 
+  filter(prop_record != 0) |> 
+  group_by(agrp_prp_id, timestep) |> 
+  mutate(n = n()) |> 
+  ungroup() |> 
+  filter(n == 2) |>
+  select(agrp_prp_id, Method, timestep) |>
+  combos()
+
+knitr::kable(ff)
+knitr::kable(fft)
+
+```
+
+At the property level, traps and snares are the most likely pairing, followed by traps and helicopters. Firearms and fixed wing aircraft are the least likely to paired with any other method, and are never paired together.
+
+At the sampling unit level, traps and snares are the most likely pairing by a wide margin, accounting for over 80% of paired methods. The next most likely pairing is traps and firearms at \~ 5%.
+
+For the `r two_prop` properties that use two methods, we can sample from the relative frequencies in @tbl-pairs-1 to assign the two methods.
+
+However, just because a property uses two methods does not mean that they are always used at the same time (i.e. during a PP). Therefore, we need to look at how often paired methods are used as single methods or in tandem.
+
+##### When two methods are used at a property, are they always used in the same PP?
+
+```{r}
+#| label: tbl-given
+#| tbl-cap: "The frequencies of how often methods are used in tandem or on their own for properties that use two methods."
+#| tbl-subcap: true
+#| layout-ncol: 2
+
+pairs <- df |> 
+  filter(agrp_prp_id %in% two_method_properties) |> 
+  select(agrp_prp_id, Method) |>
+  distinct() |> 
+  select(agrp_prp_id, Method) |> 
+  group_by(agrp_prp_id) |> 
+  mutate(n = paste0("n_", 1:n())) |> 
+  pivot_wider(names_from = n,
+                values_from = Method,
+                values_fill = "none")
+
+get_pairs_from1 <- function(m1, m2){
+  prp_ids <- pairs |> 
+  filter(n_1 == m1 & n_2 == m2 | 
+           n_1 == m2 & n_2 == m1) |> 
+  pull(agrp_prp_id)
+
+two_single <- df |> 
+  filter(agrp_prp_id %in% prp_ids) |> 
+  select(agrp_prp_id, timestep, Method) |>
+  distinct() |> 
+  group_by(agrp_prp_id, timestep)  |> 
+  mutate(n = paste0("n_", 1:n())) |> 
+  ungroup() |> 
+    pivot_wider(names_from = n,
+                values_from = Method,
+                values_fill = "none") |> 
+    select(starts_with("n_")) |> 
+    count(n_1, n_2) |> 
+    pivot_wider(names_from = n_2,
+                values_from = n,
+                values_fill = 0) |> 
+  rename(`Method` = n_1)
+
+cbind(two_single[,1], round(two_single[,-1] / sum(two_single[,-1], na.rm = TRUE), 3))  
+}
+
+knitr::kable(get_pairs_from1("Traps", "Snares"))
+knitr::kable(get_pairs_from1("Traps", "Firearms"))
+knitr::kable(get_pairs_from1("Traps", "Fixed wing"))
+knitr::kable(get_pairs_from1("Traps", "Helicopter"))
+knitr::kable(get_pairs_from1("Snares", "Firearms"))
+knitr::kable(get_pairs_from1("Snares", "Fixed wing"))
+knitr::kable(get_pairs_from1("Snares", "Helicopter"))
+knitr::kable(get_pairs_from1("Firearms", "Helicopter"))
+knitr::kable(get_pairs_from1("Fixed wing", "Helicopter"))
+
+  
+```
+
+In @tbl-given, each table shows the frequencies of paired methods in how likely they are to be used together or separately.
+
+We can then use the same exercise from the 1-method properties to determine the starting point and property size.
+
+To determine how often to use each method, we can sample from @tbl-given and/or @fig-delta
+
+-   Randomly assign the number sampling occasions given the pair of methods, and use data from @tbl-given to determine when to use each method
+-   Use return intervals only from @fig-delta, and if methods match for PPs it would be semi-random
+
+```{r}
+
+m1 <- rownames(ff)
+pairs_long <- ff |> 
+  as_tibble() |> 
+  mutate(m1 = m1) |> 
+  pivot_longer(cols = -m1,
+               names_to = "m2",
+               values_to = "prob",
+               values_drop_na = TRUE) |> 
+  unite(Methods, m1, m2, sep = " & ")
+
+sample_two_prop <- sample(pairs_long$Methods, size = two_prop, prob = pairs_long$prob, replace = TRUE)
+
+two_method_areas <- df |> 
+  filter(agrp_prp_id %in% two_method_properties) |> 
+  select(agrp_prp_id, property.size, method) |>
+  distinct() |> 
+  left_join(method_change) |> 
+  select(-method) |> 
+  rename(method = method_2) |>
+  group_by(agrp_prp_id) |> 
+  mutate(n = paste0("n_", 1:n())) |> 
+  pivot_wider(names_from = n,
+              values_from = method) |> 
+  unite(Methods, n_1, n_2, sep = " & ")
+  
+
+area_two <- function(m){
+  two_method_areas |> 
+    filter(Methods == m) |> 
+    pull(property.size) |> 
+    sample(1)
+}
+
+start_pp <- function(m){
+  if(grepl("Helicopter", m) | grepl("Fixed", m)){
+    round(runif(1, 0.5, 20))
+  } else {
+    round(runif(1, 0.5, 65))
+  }
+}
+
+tibble(
+  Property = 1:two_prop,
+  Method = sample_two_prop,
+  Area = round(vapply(sample_two_prop, area_two, 1), 2),
+  Start = vapply(sample_two_prop, start_pp, 1)
+) |> 
+  head(10) |> 
+  knitr::kable()
+
+```
+
+### 3 methods at a property
+
+```{r}
+#| label: tbl-trips
+#| tbl-cap: The proportion of method combinations when three methods are used.
+#| tbl-subcap: 
+#|   - Across properties
+#|   - Across sampling units
+
+
+get_3 <- function(df){
+  df |> 
+    mutate(n = paste0("n_", 1:n())) |> 
+    ungroup() |> 
+    pivot_wider(names_from = n,
+                values_from = Method) |> 
+    select(starts_with("n_")) |> 
+    unite(Var, n_2, n_3, sep = " & ") |> 
+    count(n_1, Var) |> 
+    pivot_wider(names_from = Var,
+                values_from = n,
+                values_fill = 0) |> 
+    rename(`1st method` = n_1)
+}
+
+c3 <- prop_property |> 
+  filter(prop_record != 0) |> 
+  group_by(agrp_prp_id) |> 
+  mutate(n = n()) |> 
+  ungroup() |> 
+  filter(n == 3) |>
+  select(agrp_prp_id, Method) |> 
+  group_by(agrp_prp_id) |> 
+  get_3()
+
+freqs_3 <- cbind(c3[,1], round(c3[,-1] / sum(c3[,-1], na.rm = TRUE), 3))
+
+c3t <- prop_propertyTime |> 
+  filter(prop_record != 0) |> 
+  group_by(agrp_prp_id, timestep) |> 
+  mutate(n = n()) |> 
+  ungroup() |> 
+  filter(n == 3) |>
+  select(agrp_prp_id, timestep, Method) |> 
+  group_by(agrp_prp_id, timestep) |> 
+  get_3()
+
+freqs_3t <- cbind(c3t[,1], round(c3t[,-1] / sum(c3t[,-1], na.rm = TRUE), 3))
+
+knitr::kable(freqs_3)
+knitr::kable(freqs_3t)
+
+```
+
+If a property used three removal methods, the most likely combination is snares, traps, and helicopters, followed by snares, traps, and firearms. These two combinations account for \~70% of triplicates. The same pattern is true at the sampling unit level, where these two combinations account for \~80% of triplicates used within a single primary period.
+
+### Effort
 
 ```{r}
 #| label: fig-joint
@@ -86,18 +910,130 @@ plot_effort(5) +
 
 ```
 
+##### Frequency of methods used, in isolation or in combination with other methods
 
 ```{r}
-#| label: fig-effort_per
-effort_data |> 
-  ggplot(aes(x = effort_per)) +
-  geom_histogram() +
-  facet_wrap(~ method_name, scales = "free") +
-  labs(y = "Effort per unit deployed",
-       title = "Histogram of effort per unit deployed by method") +
-  theme_bw()  
+#| label: tbl-methods
+#| tbl-cap: The proportion of properties and the proportion of sampling units where a method is used at least once. 
+
+
+
+n1 <- get_n(prop_property, 0, n_property, n_property) |> 
+  mutate(`Proportion of properties` = paste0(np, " (", n, ")"))
+
+n1_traps <- n1 |> filter(Method == "Traps") |> pull(np) * 100
+n1_use <- n1 |> select(Method, `Proportion of properties`)
+
+n2 <- get_n(prop_propertyTime, 0, n_units, n_units) |> 
+  mutate(`Proportion of sample units` = paste0(np, " (", n, ")"))
+n2_traps <- n2 |> filter(Method == "Traps") |> pull(np) * 100
+n2_use <- n2 |> select(Method, `Proportion of sample units`)
+
+n3 <- left_join(n1_use, n2_use)
+knitr::kable(n3)
+
 ```
 
+Unsurprisingly, methods are not used evenly across properties. For example, `r n1_traps`% of properties use traps at some point, and `r n2_traps`% of all sampling units use traps at least once.
+
+### Smapling occasions
+
+```{r}
+#| label: fig-nReps
+#| fig-cap: Histogram of how many removal events occur in a PP across all properties and methods.
+df |> 
+  ggplot() +
+  aes(x = n_reps) +
+  geom_histogram() +
+  labs(x = "Number of removal events in a PP",
+       y = "Count") +
+  theme_bw()
+
+```
+
+```{r}
+#| label: fig-nRepsMethod
+#| fig-cap: Histogram of how many times each method is used within a PP across all properties.
+df |> 
+  ggplot() +
+  aes(x = n_reps) +
+  geom_histogram() +
+  facet_wrap(~ method, scales = "free") +
+  labs(x = "Number of removal events in a PP",
+       y = "Count") +
+  theme_bw()
+# df |> 
+#   group_by(method, agrp_prp_id, timestep, n_reps) |>
+#   summarise(take = sum(take)) |> 
+#   ggplot() +
+#   aes(x = n_reps, y = take) +
+#   geom_hex() +
+#   scale_fill_viridis_c() +
+#   facet_wrap(~ method, scales = "free") +
+#   labs(x = "Number of removal events in a PP",
+#        y = "Total pigs removed in PP") +
+#   theme_bw()
+
+```
+
+```{r}
+#| label: tbl-nRepsMethod
+#| tbl-cap: Summary statistics of how many removal events occur by each method in a primary period
+
+
+df |>
+  group_by(method) |>
+  my_stats("n_reps") |> 
+  rename(Method = method) |> 
+  knitr::kable()
+
+```
+
+### Does take method correlate with property size?
+
+```{r}
+#| label: fig-propSizeMethod
+#| fig-cap: How property size correlates with method
+#| layout-ncol: 1
+df |> 
+  select(agrp_prp_id, method, property.size) |> 
+  unique() |> 
+  left_join(method_change) |> 
+  ggplot() +
+  aes(x = method_2, y = property.size) +
+  # geom_violin() +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(ylim = c(0, 200)) +
+  labs(x = "Method",
+       y = "Property size (sq. km)") +
+  theme_bw()
+
+df |> 
+  select(agrp_prp_id, method, property.size) |> 
+  unique() |> 
+  left_join(method_change) |> 
+  ggplot() +
+  aes(x = property.size) +
+  geom_histogram() +
+  facet_wrap(~ method_2) +
+  labs(x = "Property size (sq. km)",
+       y = "Count") +
+  theme_bw()
+
+df |> 
+  select(agrp_prp_id, method, property.size) |> 
+  # unique() |>
+  group_by(method) |> 
+  my_stats("property.size")
+df |> 
+  select(agrp_prp_id, method, property.size) |> 
+  unique() |>
+  group_by(method) |> 
+  my_stats("property.size")
+
+
+
+```
 
 ```{r}
 # data_timestep <- read_csv("../data/insitu/MIS.Effort.Take.All.Methods.Daily.Events.2021-03-25.csv") |>
@@ -174,124 +1110,6 @@ effort_data |>
 
 ```
 
-
-```{r}
-df <- read_csv("../data/insitu/MIS_4weekPP.csv") |> 
-  filter(st_name != "HAWAII")
-
-zero_take_properties <- df |> 
-  group_by(agrp_prp_id) |> 
-  summarise(take = sum(take)) |> 
-  filter(take == 0) |> 
-  pull(agrp_prp_id)
-
-df <- df |> 
-  filter(!agrp_prp_id %in% zero_take_properties) |> 
-  rename(method = cmp_name) |> 
-  select(agrp_prp_id, unk.prp.event.id, timestep, method, take, n_reps, st_name, cnty_name)
-
-n_property <- length(unique(df$agrp_prp_id))
-n_units <- df |> 
-  select(agrp_prp_id, timestep) |> 
-  distinct() |> 
-  nrow()
-
-get_freqs <- function(df){
-  df |>
-    group_by(method) |>
-    summarise(n_records = n(),
-              n_take = sum(take),
-              prop_records = round(n_records / nrow(df), 3)) |>
-    mutate(prop_take = round(n_take / sum(n_take), 3)) 
-}
-
-all_freq <- get_freqs(df)
-```
-
-#### Frequency of records and take for MIS data
-
-`r n_property` unique properties
-
-`r n_units` unique sampling units (property-timestep combination)
-
-  - Does not include Hawaii
-
-  - Does not include properties with zero take
-
-```{r}
-
-knitr::kable(all_freq)
-
-```
-
-
-
-```{r}
-
-method_percent <- function(dat){
-  dat |> 
-    summarise(Snares = length(which(method == "SNARE")) / n(),
-              Traps = length(which(method == "TRAPS, CAGE")) / n(),
-              Firearms = length(which(method == "FIREARMS")) / n(),
-              `Fixed wing` = length(which(method == "FIXED WING")) / n(),
-              Helicopter = length(which(method == "HELICOPTER")) / n())
-}
-
-percents_record_prp <- df |>
-  select(agrp_prp_id, method) |>
-  group_by(agrp_prp_id) |>
-  method_percent() |> 
-  ungroup() |> 
-  pivot_longer(cols = -agrp_prp_id,
-               names_to = "method",
-               values_to = "prop_record")
-
-
-method_change <- tibble(
-  method = c("TRAPS, CAGE", "SNARE", "FIREARMS", "FIXED WING", "HELICOPTER"),
-  method_2 = c("Traps", "Snares", "Firearms", "Fixed wing", "Helicopter")
-)
-  
-percents_take_prp <- df |>
-  group_by(agrp_prp_id, method) |>
-  summarise(take = sum(take)) |> 
-  ungroup() |> 
-  group_by(agrp_prp_id) |> 
-  mutate(prop_take = take / sum(take),
-         prop_take = if_else(is.nan(prop_take), 0, prop_take)) |> 
-  left_join(method_change) |> 
-  select(-method) |> 
-  rename(method = method_2)
-
-prop_property <- left_join(percents_record_prp, percents_take_prp) |> 
-  rename(Method = method)
-
-percents_record_prpTime <- df |>
-  select(agrp_prp_id, method, timestep) |>
-  group_by(agrp_prp_id, timestep) |>
-  method_percent() |> 
-  ungroup() |> 
-  pivot_longer(cols = -c(agrp_prp_id, timestep),
-               names_to = "method",
-               values_to = "prop_record")
-
-percents_take_prpTime <- df |>
-  group_by(agrp_prp_id, method, timestep) |>
-  summarise(take = sum(take)) |> 
-  ungroup() |> 
-  group_by(agrp_prp_id, timestep) |> 
-  mutate(prop_take = take / sum(take),
-         prop_take = if_else(is.nan(prop_take), 0, prop_take)) |> 
-  left_join(method_change) |> 
-  select(-method) |> 
-  rename(method = method_2)
-
-prop_propertyTime <- left_join(percents_record_prpTime, percents_take_prpTime) |> 
-  rename(Method = method)
-
-```
-
-
 ```{r}
 
 prop_property |> 
@@ -314,282 +1132,6 @@ prop_property |>
 
 
 ```
-
-### Frequency of methods used, in isolation or in combination with other methods
-
-```{r}
-#| label: tbl-methods
-#| tbl-cap: The proportion of properties and the proportion of sampling units where a method is used at least once. 
-
-get_n <- function(df, prop, M, total){
-  df |> 
-    filter(prop_record == prop) |> 
-    group_by(Method) |> 
-    count() |> 
-    mutate(n = abs(M - n),
-           np = round(n / total, 3))
-}
-
-n1 <- get_n(prop_property, 0, n_property, n_property) |> 
-  mutate(`Proportion of properties` = paste0(np, " (", n, ")"))
-
-n1_traps <- n1 |> filter(Method == "Traps") |> pull(np) * 100
-n1_use <- n1 |> select(Method, `Proportion of properties`)
-
-n2 <- get_n(prop_propertyTime, 0, n_units, n_units) |> 
-  mutate(`Proportion of sample units` = paste0(np, " (", n, ")"))
-n2_traps <- n2 |> filter(Method == "Traps") |> pull(np) * 100
-n2_use <- n2 |> select(Method, `Proportion of sample units`)
-
-n3 <- left_join(n1_use, n2_use)
-knitr::kable(n3)
-
-```
-
-Unsurprisingly, methods are not used evenly across properties. For example, `r n1_traps`% of properties use traps at some point, and `r n2_traps`% of all sampling units use traps at least once.
-
-
-
-### When is a specific method used in isolation?
-
-```{r}
-#| label: tbl-specificMethod
-#| tbl-cap: The proportion of properties and the proportion of sampling units that only use a specific method. 
-
-n1 <- get_n(prop_property, 1, 0, n_property) |> 
-  mutate(`Proportion of properties` = paste0(np, " (", n, ")"))
-
-n1_traps <- n1 |> filter(Method == "Traps") |> pull(np) * 100
-n1_use <- n1 |> select(Method, `Proportion of properties`)
-
-n2 <- get_n(prop_propertyTime, 1, 0, n_units) |> 
-  mutate(`Proportion of sample units` = paste0(np, " (", n, ")"))
-n2_traps <- n2 |> filter(Method == "Traps") |> pull(np) * 100
-n2_use <- n2 |> select(Method, `Proportion of sample units`)
-
-n3 <- left_join(n1_use, n2_use)
-knitr::kable(n3)
-
-```
-
-When a property only uses a single method, it is most likely going to be traps. For example, `r n1_traps`% of properties use traps exclusively, which accounts for `r n2_traps`% of all sampling units.
-
-
-### How many methods are used within properties and sample units?
-
-```{r}
-#| label: tbl-nMethods
-#| tbl-cap: The proportion of properties and the proportion of sampling units that use different methods.
-
-number_used_p <- prop_property |> 
-  filter(prop_record != 0) |> 
-  group_by(agrp_prp_id) |> 
-  count() |>
-  group_by(n) |> 
-  count() |> 
-  mutate(np = round(nn / n_property, 3)) |> 
-  rename(`n methods` = n) |> 
-  mutate(`Proportion of properties` = paste0(np, " (", nn, ")")) 
-
-prop_1 <- number_used_p |> 
-  filter(`n methods` == 1) |> 
-  pull(np) * 100
-prop_2 <- number_used_p |> 
-  filter(`n methods` == 2) |> 
-  pull(np) * 100
-
-n1 <- number_used_p |> select(-nn, -np)
-
-number_used_t <- prop_propertyTime |> 
-  filter(prop_record != 0) |> 
-  group_by(agrp_prp_id, timestep) |> 
-  count() |>
-  group_by(n) |> 
-  count() |> 
-  mutate(np = round(nn / n_units, 3)) |> 
-  rename(`n methods` = n) |> 
-  mutate(`Proportion of sampling units` = paste0(np, " (", nn, ")"))
-  
-ts_1 <- number_used_t |> 
-  filter(`n methods` == 1) |> 
-  pull(np) * 100
-ts_2 <- number_used_t |> 
-  filter(`n methods` == 2) |> 
-  pull(np) * 100
-ts_3 <- number_used_t |> 
-  filter(`n methods` == 3) |> 
-  pull(np) * 100
-
-
-n2 <- number_used_t |> select(-nn, -np)
-nn <- left_join(n1, n2)
-knitr::kable(nn)
-
-```
-
-`r prop_1`% and `r prop_2`% of properties use one or two methods, respectively. However, `r ts_1`% of all sampling units use a single method (@tbl-specificMethod has the breakdown of methods used in isolation), followed by `r ts_2`% of sample units using two methods. Very few sampling units use three methods (`r ts_3`%).
-
-
-### What are the relative frequencies of method combinations when two methods are used?
-
-
-```{r}
-#| label: tbl-pairs
-#| tbl-cap: The proportion of method combinations when two methods are used.
-#| tbl-subcap: 
-#|   - Across properties
-#|   - Across sampling units
-
-m_vec <- method_change$method_2
-
-combos <- function(dat){
-  df <- dat |> 
-    mutate(n = 1) |>
-    pivot_wider(names_from = Method,
-                values_from = n,
-                values_fill = 0) |> 
-  select(all_of(m_vec))
-  
-  combo_2 <- crossprod(as.matrix(df))
-  combo_2[lower.tri(combo_2, diag = TRUE)] <- NA
-  freqs_2 <- round(combo_2 / sum(combo_2, na.rm = TRUE), 3)
-  freqs_2[-5, -1]  
-}
-
-
-
-ff <- prop_property |> 
-  filter(prop_record != 0) |> 
-  group_by(agrp_prp_id) |> 
-  mutate(n = n()) |> 
-  ungroup() |> 
-  filter(n == 2) |>
-  select(agrp_prp_id, Method) |>
-  combos() 
-
-fft <- prop_propertyTime |> 
-  filter(prop_record != 0) |> 
-  group_by(agrp_prp_id, timestep) |> 
-  mutate(n = n()) |> 
-  ungroup() |> 
-  filter(n == 2) |>
-  select(agrp_prp_id, Method, timestep) |>
-  combos()
-
-knitr::kable(ff)
-knitr::kable(fft)
-
-```
-
-At the property level, traps and snares are the most likely pairing, followed by traps and helicopters. Firearms and fixed wing aircraft are the least likely to paired with any other method, and are never paired together. 
-
-At the sampling unit level, traps and snares are the most likely pairing by a wide margin, accounting for over 80% of paired methods. The next most likely pairing is traps and firearms at ~ 5%.
-
-
-### What are the relative frequencies of method combinations when three methods are used?
-
-
-```{r}
-#| label: tbl-trips
-#| tbl-cap: The proportion of method combinations when three methods are used.
-#| tbl-subcap: 
-#|   - Across properties
-#|   - Across sampling units
-
-
-get_3 <- function(df){
-  df |> 
-    mutate(n = paste0("n_", 1:n())) |> 
-    ungroup() |> 
-    pivot_wider(names_from = n,
-                values_from = Method) |> 
-    select(starts_with("n_")) |> 
-    unite(Var, n_2, n_3, sep = " & ") |> 
-    count(n_1, Var) |> 
-    pivot_wider(names_from = Var,
-                values_from = n,
-                values_fill = 0) |> 
-    rename(`1st method` = n_1)
-}
-
-c3 <- prop_property |> 
-  filter(prop_record != 0) |> 
-  group_by(agrp_prp_id) |> 
-  mutate(n = n()) |> 
-  ungroup() |> 
-  filter(n == 3) |>
-  select(agrp_prp_id, Method) |> 
-  group_by(agrp_prp_id) |> 
-  mutate(n = paste0("n_", 1:n())) |> 
-  get_3()
-
-freqs_3 <- cbind(c3[,1], round(c3[,-1] / sum(c3[,-1], na.rm = TRUE), 3))
-
-c3t <- prop_propertyTime |> 
-  filter(prop_record != 0) |> 
-  group_by(agrp_prp_id, timestep) |> 
-  mutate(n = n()) |> 
-  ungroup() |> 
-  filter(n == 3) |>
-  select(agrp_prp_id, timestep, Method) |> 
-  group_by(agrp_prp_id, timestep) |> 
-  get_3()
-
-freqs_3t <- cbind(c3t[,1], round(c3t[,-1] / sum(c3t[,-1], na.rm = TRUE), 3))
-
-knitr::kable(freqs_3)
-knitr::kable(freqs_3t)
-
-```
-
-If a property used three removal methods, the most likely combination is snares, traps, and helicopters, followed by snares, traps, and firearms. These two combinations account for ~70% of triplicates. The same pattern is true at the sampling unit level, where these two combinations account for ~80% of triplicates used within a single primary period.
-
-
-# What is the return interval of helicopters?
-
-
-```{r}
-#| label: fig-heliDelta
-#| fig-cap: Histogram of how often helicopters return within properties
-heli_intervals <- prop_propertyTime |> 
-  filter(Method == "Helicopter",
-         prop_record != 0) |> 
-  select(agrp_prp_id, timestep) |> 
-  group_by(agrp_prp_id) |> 
-  mutate(delta = c(0, diff(timestep)),
-         single_occurance = if_else(n() == 1, 1, 0),
-         first_occurance = if_else(delta == 0 & single_occurance == 0, 1, 0)) |> 
-  ungroup()
-
-heli_intervals |>
-  filter(delta > 0) |> 
-  ggplot(aes(x = delta)) +
-    geom_histogram(binwidth = 1, center = 0) +
-    labs(x = "Return interval",
-         y = "Count") +
-    theme_bw()
-```
-
-
-
-```{r}
-#| label: tbl-heliDelta
-#| tbl-cap: Summary statistics of how many primary periods helicopters return to properties. Note that primary periods are four weeks long.
-heli_intervals |>
-  filter(delta > 0) |> 
-  summarise(Min = min(delta),
-            `2.5% CI` = round(quantile(delta, 0.025), 2),
-            `25% CI` = round(quantile(delta, 0.25), 2),
-            Median = median(delta),
-            Mean = round(mean(delta), 2),
-            `75% CI` = round(quantile(delta, 0.75), 2),
-            `97.5% CI` = round(quantile(delta, 0.975), 2),
-            Max = max(delta)) |>
-  knitr::kable()
-
-```
-
-
 
 ### Number of properties that use n number of methods
 
@@ -620,5 +1162,3 @@ my_hist(n_methods, 4)
 my_hist(n_methods, 5)
 
 ```
-
-
