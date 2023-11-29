@@ -51,8 +51,7 @@ property_attributes <- list(
   num = NULL,
   method_1 = NULL,
   area = NULL,
-  observations = NULL,
-  n_reps = NULL
+  effort = NULL
 )
 
 # initiate list with the number of properties we need ----
@@ -167,10 +166,11 @@ get_reps <- function(reps_df, m, size){
 ### sample the number of observations and reps, place in properties list
 for(i in seq_len(n_one_method)){
   sample_occasions <- get_sample_occasions(one_method_return, sample_one_method[i], start[i], n_pp)
-  properties_one <- assign_in(properties_one, list(i, "observations"), sample_occasions)
-
   n_reps <- get_reps(n_reps_single_method, sample_one_method[i], length(sample_occasions))
-  properties_one <- assign_in(properties_one, list(i, "n_reps"), n_reps)
+
+  effort <- tibble(sample_occasions = sample_occasions, n_reps = n_reps)
+
+  properties_one <- assign_in(properties_one, list(i, "effort"), effort)
 }
 
 
@@ -188,8 +188,7 @@ property_attributes <- list(
   method_1 = NULL,
   method_2 = NULL,
   area = NULL,
-  observations = NULL,
-  n_reps = NULL
+  effort = NULL
 )
 properties_two <- rep(list(property_attributes), n_two_method)
 
@@ -305,47 +304,45 @@ get_sample_occasions_two <- function(return_df, m1, m2, max_pp){
     slice(sample.int(nrow(return_df), 1))
   effort <- obs |>
     select(starts_with("method")) |>
-    mutate(observations = start)
+    mutate(sample_occasions = start)
 
-  end_pp <- start
+  # end_pp <- start
 
-  while(end_pp <= max_pp){
-    obs <- return_df |>
-      slice(sample.int(nrow(return_df), 1))
+  create_effort_df <- function(start_effort, start_pp){
+    effort <- start_effort
+    end_pp <- start_pp
+    for(xx in start_pp:max_pp){
+      obs <- return_df |>
+        slice(sample.int(nrow(return_df), 1))
 
-    interval <- obs |> pull(delta)
-    end_pp <- end_pp + interval
+      interval <- obs |> pull(delta)
+      end_pp <- end_pp + interval
 
-    m <- obs |>
-      select(starts_with("method")) |>
-      mutate(observations = end_pp)
-    effort <- bind_rows(effort, m)
+      m <- obs |>
+        select(starts_with("method")) |>
+        mutate(sample_occasions = end_pp)
+      effort <- bind_rows(effort, m)
 
-    sample_occasions <- effort |> pull(observations)
-
-    # need to make sure we get at least two sample occasions
-    if(length(sample_occasions) == 2 & end_pp > n_pp){
-      effort <- effort |> slice(1)
-      sample_occasions <- effort |> pull(observations)
-      end_pp <- sample_occasions
-    }
-
-    # need to make sure at least one occasion has two methods
-    if(end_pp <= max_pp){
-      n_one_method <- length(which(is.na(effort$method_2)))
-      if(n_one_method == nrow(effort)){
+      # need to make sure we get at least two sample occasions
+      if(nrow(effort) == 2 & end_pp >= max_pp){
         effort <- effort |> slice(1)
-        sample_occasions <- effort |> pull(observations)
-        end_pp <- sample_occasions
+        end_pp <- effort |> pull(sample_occasions)
       }
+
+      if(end_pp > max_pp) break
+
     }
-
+    effort
   }
-  effort
+
+  effort_sample <- create_effort_df(effort, start)
+
+  # need to make sure at least one occasion has two methods
+  while(all(is.na(effort_sample$method_2))){
+    effort_sample <- create_effort_df(effort, start)
+  }
+  effort_sample
 }
-
-sample_occasions <- get_sample_occasions_two(return, m1[8], m2[8], n_pp)
-
 
 n_reps_two_method <- df |>
   filter(property %in% two_method_props) |>
@@ -371,10 +368,9 @@ get_reps_two <- function(m1, m2){
   } else {
     reps <- apply(df, 2, sample, 1)
   }
-  tibble(n_reps_1 = reps[1], n_reps2 = reps[2])
+  tibble(n_reps_1 = reps[1], n_reps_2 = reps[2])
 }
 
-get_reps_two(m1, m2)
 
 ### sample the number of observations and reps, place in properties list
 for(i in seq_len(n_two_method)){
@@ -385,9 +381,16 @@ for(i in seq_len(n_two_method)){
   m2_i <- sample_occasions |> pull(method_2)
 
   n_reps <- map2(m1_i, m2_i, get_reps_two) |> list_rbind()
-  r <- bind_cols(sample_occasions, n_reps)
+  effort <- bind_cols(sample_occasions, n_reps)
 
-  properties_two <- assign_in(properties_two, list(i, "observations"), r)
+  testthat::expect(effort$sample_occasions[nrow(effort)] <= n_pp,
+                   paste("Last PP exceeds boundary for property", i))
+  testthat::expect(all(!is.na(effort$method_2)),
+                   paste("Second method not used in property", i))
+
+  properties_two <- assign_in(properties_two, list(i, "effort"), effort)
+  # glimpse(effort)
 }
 
+str(properties_two)
 
