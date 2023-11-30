@@ -170,6 +170,9 @@ for(i in seq_len(n_one_method)){
 
   effort <- tibble(sample_occasions = sample_occasions, n_reps = n_reps)
 
+  testthat::expect(effort$sample_occasions[nrow(effort)] <= n_pp,
+                   paste("Last PP exceeds boundary for 1-method property", i))
+
   properties_one <- assign_in(properties_one, list(i, "effort"), effort)
 }
 
@@ -227,7 +230,7 @@ two_method_prob <- method_pairs |>
   mutate(prob = count / sum(count))
 
 ### sample the index of rows in probability table given probability column
-pairs_sample <- sample.int(nrow(method_pairs), n_two_method, prob = two_method_prob$prob, replace = TRUE)
+pairs_sample <- sample(1:nrow(method_pairs), n_two_method, prob = two_method_prob$prob, replace = TRUE)
 
 ### use index samples to select method pairs
 sample_two_method <- two_method_prob |>
@@ -242,15 +245,19 @@ properties_two <- place_vec(properties_two, n_two_method, "method_1", m1)
 properties_two <- place_vec(properties_two, n_two_method, "method_2", m2)
 
 ## function to sample property area from a given set of properties and methods ----
-two_method_areas <- df |>
-  filter(property %in% two_method_props) |>
-  select(property, method, property.size) |>
-  distinct() |>
-  group_by(property) |>
-  mutate(n = paste0("n_", 1:n())) |>
-  ungroup() |>
-  pivot_wider(names_from = n,
-              values_from = method)
+subset_area_n_method <- function(prop_vec){
+  df |>
+    filter(property %in% prop_vec) |>
+    select(property, method, property.size) |>
+    distinct() |>
+    group_by(property) |>
+    mutate(n = paste0("n_", 1:n())) |>
+    ungroup() |>
+    pivot_wider(names_from = n,
+                values_from = method)
+}
+
+two_method_areas <- subset_area_n_method(two_method_props)
 
 get_area_2 <- function(m1, m2){
   two_method_areas |>
@@ -265,34 +272,57 @@ areas <- map2_vec(m1, m2, get_area_2)
 properties_two <- place_vec(properties_two, n_two_method, "area", round(areas, 2))
 
 ## joint and single return intervals ----
-joint_return <- df |>
-  filter(property %in% two_method_props) |>
-  select(property, timestep, method) |>
-  distinct() |>
-  pivot_wider(names_from = method,
-              values_from = method) |>
-  unite(method, m_vec, sep = "&", na.rm = TRUE) |>
-  group_by(property, method) |>
-  mutate(delta = c(0, diff(timestep)),
-         single_occurance = if_else(n() == 1, 1, 0),
-         first_occurance = if_else(delta == 0 & single_occurance == 0, 1, 0)) |>
-  ungroup() |>
-  separate(method, c("method_1", "method_2"), sep = "&") |>
-  mutate(joint = if_else(!is.na(method_2), 1, 0))
+n_return_intervals <- function(prop_vec, n){
+  temp <- df |>
+    filter(property %in% prop_vec) |>
+    select(property, timestep, method) |>
+    distinct() |>
+    pivot_wider(names_from = method,
+                values_from = method) |>
+    unite(method, m_vec, sep = "&", na.rm = TRUE) |>
+    group_by(property, method) |>
+    mutate(delta = c(0, diff(timestep))) |>
+    filter(delta > 0) |>
+    ungroup() |>
+    separate(method, paste0("method_", 1:n), sep = "&") |>
+    suppressWarnings() # warns about not enough pieces, fill with NA is what we want
+
+  n <- apply(temp[,paste0("method_", 1:n)], 1, function(x) sum(!is.na(x)))
+  temp |> mutate(n = n)
+}
+
+joint_return <- n_return_intervals(two_method_props, 2)
 
 ## function to create a return interval df given two methods ----
-get_joint_return <- function(m1, m2){
-  pairs_return <- joint_return |>
-    filter(joint == 1,
-           ((method_1 == m1 & method_2 == m2) |
-              (method_1 == m2 & method_2 == m1)))
+get_joint_return <- function(m){
 
-  single_return <- joint_return |>
-    filter(joint == 0,
-           method_1 == m1 | method_1 == m2)
+  temp <- joint_return |>
+    filter(n > 1)
 
-  bind_rows(single_return, pairs_return) |>
-    filter(delta > 0)
+  id <- which(apply(temp[,paste0("method_", 1:n)], 1, function(x) all(x %in% m)))
+
+  p <- temp |>
+    slice(id) |>
+    pull(property)
+
+  joint_return |>
+    filter(property %in% p)
+
+  # temp <- tibble()
+  # for(i in 1:length(m)){
+  #   mm <- joint_return |>
+  #     filter(n == i) |>
+  #     pivot_longer(cols = starts_with("method_"),
+  #                  names_to = "method_n",
+  #                  values_to = "type") |>
+  #     filter(type %in% m[1:i])
+  #   temp <- bind_rows(temp, mm)
+  # }
+  #
+  # temp |>
+  #   pivot_wider(names_from = method_n,
+  #               values_from = type)
+
 }
 
 
@@ -329,7 +359,9 @@ get_sample_occasions_two <- function(return_df, m1, m2, max_pp){
         end_pp <- effort |> pull(sample_occasions)
       }
 
-      if(end_pp > max_pp) break
+      if(end_pp > max_pp){
+        effort <- effort |> slice(-nrow(effort))
+      }
 
     }
     effort
@@ -373,8 +405,9 @@ get_reps_two <- function(m1, m2){
 
 
 ### sample the number of observations and reps, place in properties list
+pb <- txtProgressBar(min = 1, max = n_two_method, style = 3)
 for(i in seq_len(n_two_method)){
-  sample_occasions <- get_joint_return(m1[i], m2[i]) |>
+  sample_occasions <- get_joint_return(c(m1[i], m2[i])) |>
     get_sample_occasions_two(m1[i], m2[i], n_pp)
 
   m1_i <- sample_occasions |> pull(method_1)
@@ -384,13 +417,105 @@ for(i in seq_len(n_two_method)){
   effort <- bind_cols(sample_occasions, n_reps)
 
   testthat::expect(effort$sample_occasions[nrow(effort)] <= n_pp,
-                   paste("Last PP exceeds boundary for property", i))
-  testthat::expect(all(!is.na(effort$method_2)),
-                   paste("Second method not used in property", i))
+                   paste("Last PP exceeds boundary for 2-method property", i))
+  testthat::expect(!all(is.na(effort$method_2)),
+                   paste("Second method not used in 2-method property", i))
 
   properties_two <- assign_in(properties_two, list(i, "effort"), effort)
-  # glimpse(effort)
+  setTxtProgressBar(pb, i)
+}
+close(pb)
+
+
+# -----------------------------------------------------------------
+# 3-method properties ----
+# -----------------------------------------------------------------
+
+n_three_method <- n_rel$n_simulate[3]
+three_method_props <- get_properties(3)
+
+# initiate list with the number of properties we need ----
+# list of things we need to keep track of
+property_attributes <- list(
+  num = NULL,
+  method_1 = NULL,
+  method_2 = NULL,
+  method_3 = NULL,
+  area = NULL,
+  effort = NULL
+)
+
+properties_three <- rep(list(property_attributes), n_three_method)
+properties_three <- place_vec(properties_three, n_three_method, "num", 1:n_three_method)
+
+c3 <- df |>
+  filter(property %in% three_method_props) |>
+  select(property, method) |>
+  distinct() |>
+  group_by(property) |>
+  mutate(m = paste0("m_", 1:n())) |>
+  ungroup() |>
+  pivot_wider(names_from = m,
+              values_from = method) |>
+  select(starts_with("m_")) |>
+  count(m_1, m_2, m_3) |>
+  mutate(prob = n / sum(n))
+
+
+draws <- sample(1:nrow(c3), n_three_method, prob = c3$prob, replace = TRUE)
+
+### use index samples to select method combinations
+sample_three_method <- c3 |>
+  slice(draws) |>
+  select(starts_with("m_"))
+
+m1 <- sample_three_method |> pull(m_1)
+m2 <- sample_three_method |> pull(m_2)
+m3 <- sample_three_method |> pull(m_3)
+
+## place the pair of methods in the 3-method data list ----
+properties_three <- place_vec(properties_three, n_three_method, "method_1", m1)
+properties_three <- place_vec(properties_three, n_three_method, "method_2", m2)
+properties_three <- place_vec(properties_three, n_three_method, "method_3", m3)
+
+## property area for 3-method properties ----
+three_method_areas <- subset_area_n_method(three_method_props) |>
+  mutate(id = 1:n())
+
+get_area_3 <- function(m){
+  three_method_areas |>
+    filter(
+      (n_1 == m[1] | n_2 == m[1] | n_3 == m[1]) &
+      (n_1 == m[2] | n_2 == m[2] | n_3 == m[2]) &
+      (n_1 == m[3] | n_2 == m[3] | n_3 == m[3])
+      ) |>
+    pull(property.size) |>
+    sample(1)
 }
 
-str(properties_two)
+## assign areas to 2-method properties ----
+areas <- 1:n_three_method |>
+  map_vec(\(x) get_area_3(c(m1[x], m2[x], m3[x])))
 
+properties_three <- place_vec(properties_three, n_three_method, "area", round(areas, 2))
+
+
+## joint (2 and 3) and single return intervals ----
+joint_return <- n_return_intervals(three_method_props, 3)
+
+## function to create a return interval df given two methods ----
+get_joint_return <- function(m){
+  pairs_return <- joint_return |>
+    filter(joint == 1,
+           ((method_1 == m1 & method_2 == m2) |
+              (method_1 == m2 & method_2 == m1)))
+
+  single_return <- joint_return |>
+    filter(joint == 0,
+           method_1 %in% m)
+
+  bind_rows(single_return, pairs_return) |>
+    filter(delta > 0)
+}
+
+str(properties_three)
