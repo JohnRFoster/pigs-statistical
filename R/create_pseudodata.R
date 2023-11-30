@@ -308,21 +308,6 @@ get_joint_return <- function(m){
   joint_return |>
     filter(property %in% p)
 
-  # temp <- tibble()
-  # for(i in 1:length(m)){
-  #   mm <- joint_return |>
-  #     filter(n == i) |>
-  #     pivot_longer(cols = starts_with("method_"),
-  #                  names_to = "method_n",
-  #                  values_to = "type") |>
-  #     filter(type %in% m[1:i])
-  #   temp <- bind_rows(temp, mm)
-  # }
-  #
-  # temp |>
-  #   pivot_wider(names_from = method_n,
-  #               values_from = type)
-
 }
 
 
@@ -335,8 +320,6 @@ get_sample_occasions_two <- function(return_df, m1, m2, max_pp){
   effort <- obs |>
     select(starts_with("method")) |>
     mutate(sample_occasions = start)
-
-  # end_pp <- start
 
   create_effort_df <- function(start_effort, start_pp){
     effort <- start_effort
