@@ -105,16 +105,8 @@ properties_one <- place_vec(properties_one, n_one_method, "area", round(areas, 2
 ### start with determining the first PP ----
 
 ### function to assign a stating PP given method ----
-start_pp <- function(m){
-  if(grepl("Helicopter", m) | grepl("Fixed", m)){
-    high <- 0.45 * n_pp
-  } else {
-    high <- 0.75 * n_pp
-  }
-  round(runif(1, 0.5, high))
-}
-
-start <- vapply(sample_one_method, start_pp, 1)
+start_pp <- function() sample.int(65, n_one_method, replace = TRUE)
+start <- start_pp()
 
 ### lookup table for return intervals by method for single method-properties ----
 one_method_return <- df |>
@@ -164,6 +156,7 @@ get_reps <- function(reps_df, m, size){
 }
 
 ### sample the number of observations and reps, place in properties list
+pb <- txtProgressBar(min = 1, max = n_one_method, style = 3)
 for(i in seq_len(n_one_method)){
   sample_occasions <- get_sample_occasions(one_method_return, sample_one_method[i], start[i], n_pp)
   n_reps <- get_reps(n_reps_single_method, sample_one_method[i], length(sample_occasions))
@@ -174,8 +167,9 @@ for(i in seq_len(n_one_method)){
                    paste("Last PP exceeds boundary for 1-method property", i))
 
   properties_one <- assign_in(properties_one, list(i, "effort"), effort)
+  setTxtProgressBar(pb, i)
 }
-
+close(pb)
 
 # -----------------------------------------------------------------
 # 2-method properties ----
@@ -200,45 +194,38 @@ properties_two <- place_vec(properties_two, n_two_method, "num", 1:n_two_method)
 ## count of method pairs by first method used then second ----
 ## for sampling from to assign 2-method properties their methods
 m_vec <- c("Traps", "Snares", "Firearms", "Fixed wing", "Helicopter")
-combos <- df |>
-  filter(property %in% two_method_props) |>
-  select(property, method) |>
-  distinct() |>
-  group_by(property) |>
-  mutate(n = 1) |>
-  ungroup() |>
-  pivot_wider(names_from = method,
-              values_from = n,
-              values_fill = 0) |>
-  select(all_of(m_vec)) |>
-  as.matrix() |>
-  crossprod()
 
-combos[lower.tri(combos, diag = TRUE)] <- NA
+get_method_rel_freq <- function(prop_vec){
+  temp <- df |>
+    filter(property %in% prop_vec) |>
+    select(property, method) |>
+    distinct() |>
+    group_by(property) |>
+    mutate(m = paste0("m_", 1:n())) |>
+    ungroup() |>
+    pivot_wider(names_from = m,
+                values_from = method) |>
+    select(starts_with("m_"))
 
-method_pairs <- combos |>
-  as_tibble() |>
-  mutate(method = m_vec) |>
-  pivot_longer(cols = -method,
-               names_to = "method2",
-               values_to = "count",
-               values_drop_na = TRUE) |>
-  filter(count > 0)
+  m <- colnames(temp)
+
+  temp |> count(!!!syms(m)) |>
+    mutate(prob = n / sum(n))
+}
 
 ### the probability of using a given method first for 2-method properties ----
-two_method_prob <- method_pairs |>
-  mutate(prob = count / sum(count))
+two_method_prob <- get_method_rel_freq(two_method_props)
 
 ### sample the index of rows in probability table given probability column
-pairs_sample <- sample(1:nrow(method_pairs), n_two_method, prob = two_method_prob$prob, replace = TRUE)
+pairs_sample <- sample(1:nrow(two_method_prob), n_two_method, prob = two_method_prob$prob, replace = TRUE)
 
 ### use index samples to select method pairs
 sample_two_method <- two_method_prob |>
   slice(pairs_sample) |>
-  select(starts_with("method"))
+  select(starts_with("m_"))
 
-m1 <- sample_two_method |> pull(method)
-m2 <- sample_two_method |> pull(method2)
+m1 <- sample_two_method |> pull(m_1)
+m2 <- sample_two_method |> pull(m_2)
 
 ## place the pair of methods in the 2-method data list ----
 properties_two <- place_vec(properties_two, n_two_method, "method_1", m1)
@@ -257,17 +244,27 @@ subset_area_n_method <- function(prop_vec){
                 values_from = method)
 }
 
-two_method_areas <- subset_area_n_method(two_method_props)
+get_area_n <- function(area_df, m){
 
-get_area_2 <- function(m1, m2){
-  two_method_areas |>
-    filter((n_1 == m1 & n_2 == m2) | (n_1 == m2 & n_2 == m1)) |>
+  area_df |>
+    pivot_longer(cols = starts_with("n_"),
+                 names_to = "n",
+                 values_to = "method") |>
+    group_by(property) |>
+    filter(all(method %in% m)) |>
+    ungroup() |>
+    select(property, property.size) |>
+    distinct() |>
     pull(property.size) |>
     sample(1)
+
 }
 
 ## assign areas to 2-method properties ----
-areas <- map2_vec(m1, m2, get_area_2)
+two_method_areas <- subset_area_n_method(two_method_props)
+areas <- 1:n_two_method |>
+  map(\(x) get_area_n(two_method_areas, c(m1[x], m2[x]))) |>
+  list_c()
 
 properties_two <- place_vec(properties_two, n_two_method, "area", round(areas, 2))
 
@@ -282,7 +279,7 @@ n_return_intervals <- function(prop_vec, n){
     unite(method, m_vec, sep = "&", na.rm = TRUE) |>
     group_by(property, method) |>
     mutate(delta = c(0, diff(timestep))) |>
-    filter(delta > 0) |>
+    # filter(delta > 0) |>
     ungroup() |>
     separate(method, paste0("method_", 1:n), sep = "&") |>
     suppressWarnings() # warns about not enough pieces, fill with NA is what we want
@@ -291,32 +288,55 @@ n_return_intervals <- function(prop_vec, n){
   temp |> mutate(n = n)
 }
 
-joint_return <- n_return_intervals(two_method_props, 2)
+all_return_intervals <- n_return_intervals(two_method_props, 2)
 
 ## function to create a return interval df given two methods ----
-get_joint_return <- function(m){
+get_joint_return <- function(return_df, m){
 
-  temp <- joint_return |>
-    filter(n > 1)
+  nm <- length(m)
 
-  id <- which(apply(temp[,paste0("method_", 1:n)], 1, function(x) all(x %in% m)))
+  p <- return_df |>
+    pivot_longer(cols = starts_with("method"),
+                 names_to = "Mn",
+                 values_to = "method",
+                 values_drop_na = TRUE) |>
+    select(property, method) |>
+    distinct() |>
+    group_by(property) |>
+    filter(all(method %in% m)) |>
+    ungroup() |>
+    pull(property) |>
+    unique()
 
-  p <- temp |>
-    slice(id) |>
-    pull(property)
+  joint_delta <- return_df |>
+    filter(property %in% p,
+           delta > 0)
 
-  joint_return |>
-    filter(property %in% p)
+  # there are some combinations (i.e. snares and fixed wing) where all delta = 0
+  # which means this combination only appears once in the time series for each property
+  # to included these combinations let's just randomly assign a return interval
+  if(all(is.na(joint_delta$method_2))){
 
+    adjustment <- return_df |>
+      filter(property %in% p,
+             !is.na(method_2)) |>
+      mutate(delta = sample.int(50, n()))
+
+    return(bind_rows(joint_delta, adjustment))
+
+  } else {
+
+    return(joint_delta)
+
+  }
 }
 
-
 ## function to generate sample occasions of single or joint use of methods
-get_sample_occasions_two <- function(return_df, m1, m2, max_pp){
-  start <- min(vapply(c(m1, m2), start_pp, 1))
+get_sample_occasions_two <- function(joint_return_df, m1, m2, max_pp){
+  start <- start_pp()
 
-  obs <- return_df |>
-    slice(sample.int(nrow(return_df), 1))
+  obs <- joint_return_df |>
+    slice(sample.int(nrow(joint_return_df), 1))
   effort <- obs |>
     select(starts_with("method")) |>
     mutate(sample_occasions = start)
@@ -325,8 +345,8 @@ get_sample_occasions_two <- function(return_df, m1, m2, max_pp){
     effort <- start_effort
     end_pp <- start_pp
     for(xx in start_pp:max_pp){
-      obs <- return_df |>
-        slice(sample.int(nrow(return_df), 1))
+      obs <- joint_return_df |>
+        slice(sample.int(nrow(joint_return_df), 1))
 
       interval <- obs |> pull(delta)
       end_pp <- end_pp + interval
@@ -359,18 +379,22 @@ get_sample_occasions_two <- function(return_df, m1, m2, max_pp){
   effort_sample
 }
 
-n_reps_two_method <- df |>
-  filter(property %in% two_method_props) |>
-  group_by(property, timestep, method) |>
-  count() |>
-  ungroup() |>
-  pivot_wider(names_from = method,
-              values_from = n)
+get_n_reps_joint <- function(prop_vec){
+  df |>
+    filter(property %in% prop_vec) |>
+    group_by(property, timestep, method) |>
+    count() |>
+    ungroup() |>
+    pivot_wider(names_from = method,
+                values_from = n)
+}
+
+n_reps_two_method <- get_n_reps_joint(two_method_props)
 
 #### function to sample number of removal events in a PP given a pair of methods ----
-get_reps_two <- function(m1, m2){
+get_reps_two <- function(m1, m2, ...){
 
-  m <- c(m1, m2)
+  m <- c(m1, m2, ...)
   m <- m[complete.cases(m)]
 
   df <- n_reps_two_method |>
@@ -390,7 +414,7 @@ get_reps_two <- function(m1, m2){
 ### sample the number of observations and reps, place in properties list
 pb <- txtProgressBar(min = 1, max = n_two_method, style = 3)
 for(i in seq_len(n_two_method)){
-  sample_occasions <- get_joint_return(c(m1[i], m2[i])) |>
+  sample_occasions <- get_joint_return(all_return_intervals, c(m1[i], m2[i])) |>
     get_sample_occasions_two(m1[i], m2[i], n_pp)
 
   m1_i <- sample_occasions |> pull(method_1)
@@ -408,7 +432,7 @@ for(i in seq_len(n_two_method)){
   setTxtProgressBar(pb, i)
 }
 close(pb)
-
+str(properties_two)
 
 # -----------------------------------------------------------------
 # 3-method properties ----
@@ -465,40 +489,19 @@ properties_three <- place_vec(properties_three, n_three_method, "method_3", m3)
 three_method_areas <- subset_area_n_method(three_method_props) |>
   mutate(id = 1:n())
 
-get_area_3 <- function(m){
-  three_method_areas |>
-    filter(
-      (n_1 == m[1] | n_2 == m[1] | n_3 == m[1]) &
-      (n_1 == m[2] | n_2 == m[2] | n_3 == m[2]) &
-      (n_1 == m[3] | n_2 == m[3] | n_3 == m[3])
-      ) |>
-    pull(property.size) |>
-    sample(1)
-}
-
-## assign areas to 2-method properties ----
+## assign areas to 3-method properties ----
 areas <- 1:n_three_method |>
-  map_vec(\(x) get_area_3(c(m1[x], m2[x], m3[x])))
+  map(\(x) get_area_n(three_method_areas, c(m1[x], m2[x], m3[x]))) |>
+  list_c()
 
 properties_three <- place_vec(properties_three, n_three_method, "area", round(areas, 2))
-
 
 ## joint (2 and 3) and single return intervals ----
 joint_return <- n_return_intervals(three_method_props, 3)
 
-## function to create a return interval df given two methods ----
-get_joint_return <- function(m){
-  pairs_return <- joint_return |>
-    filter(joint == 1,
-           ((method_1 == m1 & method_2 == m2) |
-              (method_1 == m2 & method_2 == m1)))
+n_reps_three_method <- get_n_reps_joint(three_method_props)
 
-  single_return <- joint_return |>
-    filter(joint == 0,
-           method_1 %in% m)
 
-  bind_rows(single_return, pairs_return) |>
-    filter(delta > 0)
-}
 
-str(properties_three)
+
+
